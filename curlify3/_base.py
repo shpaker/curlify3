@@ -16,32 +16,29 @@ class BaseRequestData(ABC):
         self._request = request
 
     @property
-    @abstractmethod
-    def url(
-        self,
-    ) -> str:
-        raise NotImplementedError
+    def url(self) -> str:
+        return str(self._request.url)
 
     @property
-    @abstractmethod
-    def cookies(
-        self,
-    ) -> str:
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
     def method(
         self,
     ) -> str:
-        raise NotImplementedError
+        return self._request.method
 
     @property
-    @abstractmethod
     def headers(
         self,
-    ) -> Dict[str, Any]:
-        raise NotImplementedError
+    ) -> dict[str, Any]:
+        headers = {name.lower(): value for name, value in dict(self._request.headers).items()}
+        if self._request.headers.get('cookie'):
+            del headers['cookie']
+        return headers
+
+    @property
+    def cookies(self) -> str | None:
+        if 'cookie' not in self._request.headers:
+            return None
+        return self._request.headers.get('cookie')
 
     @abstractmethod
     def body(

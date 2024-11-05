@@ -10,6 +10,11 @@ with suppress(ImportError):
 
     _REQUEST_DATA_CLASSES.append(AsyncHttpxRequest)
 
+with suppress(ImportError):
+    from curlify3.libraries._starlette import StarletteRequest
+
+    _REQUEST_DATA_CLASSES.append(StarletteRequest)
+
 
 async def to_curl(request):
     data = make_request_data_obj(request, _REQUEST_DATA_CLASSES)

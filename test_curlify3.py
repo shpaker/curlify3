@@ -1,12 +1,14 @@
 from pathlib import Path
 
-import requests
+from fastapi import FastAPI
+
+import fastapi
 import httpx
 import pytest
-import fastapi
+import requests
+
 from curlify3 import to_curl
 from curlify3.asyncio import to_curl as async_to_curl
-
 
 _BINARY_ATTACHMENT_PATH = Path(__file__).parent / "image.png"
 _PARAMS = [
@@ -30,10 +32,10 @@ _PARAMS = [
     pytest.param(
         httpx.Request(
             method="GET",
-            url="https://httpbin.org/cookies",
+            url="https://httpbin.org/get",
             cookies={"bar": "baz"},
         ),
-        "curl -b bar=baz -H 'host: httpbin.org' https://httpbin.org/cookies",
+        "curl -b bar=baz -H 'host: httpbin.org' https://httpbin.org/get",
         id="COOKIE",
     ),
     pytest.param(
@@ -139,10 +141,10 @@ async def test_httpx_async_to_curl(
         pytest.param(
             requests.Request(
                 method="GET",
-                url="https://httpbin.org/cookies",
+                url="https://httpbin.org/get",
                 cookies={"bar": "baz"},
             ),
-            "curl -b bar=baz https://httpbin.org/cookies",
+            "curl -b bar=baz https://httpbin.org/get",
             id="COOKIE",
         ),
         pytest.param(
@@ -153,6 +155,15 @@ async def test_httpx_async_to_curl(
             ),
             "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'bar=baz&abc=123' https://httpbin.org/post",
             id="FORM",
+        ),
+        pytest.param(
+            requests.Request(
+                method="POST",
+                url="https://httpbin.org/post",
+                data="foo",
+            ),
+            "curl -X POST -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+            id="TEXT",
         ),
         pytest.param(
             requests.Request(
@@ -196,5 +207,38 @@ def test_requests_to_curl(
     assert results == expected, results
 
 
-def test_aaa():
-    fastapi.Request
+app = FastAPI()
+
+
+@app.get("/get")
+async def read_root(request: fastapi.Request) -> fastapi.Response:
+    data = await async_to_curl(request)
+    return fastapi.Response(content=data)
+
+
+@app.post("/post")
+async def read_root(request: fastapi.Request) -> fastapi.Response:
+    data = await async_to_curl(request)
+    return fastapi.Response(content=data)
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _PARAMS,
+)
+@pytest.mark.asyncio
+async def test_starlette_async_to_curl(
+    req: httpx.Request,
+    expected: str,
+)-> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test/get"
+    ) as client:
+        response = await client.send(req)
+    assert response.status_code == 200, response.status_code
+    results = response.text
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
+    assert results == expected, results
