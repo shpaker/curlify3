@@ -1,9 +1,10 @@
 [tool.poetry]
 name = "curlify3"
 version = "0.1.0"
-description = "yet another python Request objects curlificator"
+description = "yet another library to convert request object to curl command"
 authors = ["A.Shpak <aleksander.shpak.als@gmail.com>"]
 readme = "README.md"
+repository = "https://github.com/shpaker/curlify3"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<4.0"
