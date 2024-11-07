@@ -1,7 +1,21 @@
-yet another python Request objects curlificator
-===
+# yet another library to convert python requests request object to curl command
 
-todo:
-- тест с тектсом в теле для requests
-- проверить как уйдет запрос с одним лишь content и сформировать нормальную курлу
-- оттестить фастапи реквест через httpx клиента
+[![PyPI](https://img.shields.io/pypi/v/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
+[![PyPI](https://img.shields.io/pypi/dm/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
+
+## Installation
+
+```sh
+pip install curlify3
+```
+
+## Example
+
+```py
+from curlify3 import to_curl
+import requests
+
+response = requests.get("http://google.ru")
+print(to_curl(response.request))
+# curl -H 'user-agent: python-requests/2.32.3' -H 'accept-encoding: gzip, deflate' -H 'accept: */*' -H 'connection: keep-alive' http://www.google.ru/
+```
