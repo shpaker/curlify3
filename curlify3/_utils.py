@@ -1,23 +1,34 @@
 from contextlib import suppress
 
-from curlify3._curl import make_curl_string
-
 _REQUEST_DATA_CLASSES = []
+_REQUEST_DATA_CLASSES_ASYNC = []
 
 
 with suppress(ImportError):
-    from curlify3.libraries._requests import RequestsRequest
+    from curlify3._req_requests import RequestsRequest
 
     _REQUEST_DATA_CLASSES.append(RequestsRequest)
 
 
 with suppress(ImportError):
-    from curlify3.libraries._httpx import HttpxRequest
+    from curlify3._req_httpx import HttpxRequest
 
     _REQUEST_DATA_CLASSES.append(HttpxRequest)
 
 
-def make_request_data_obj(request, request_data_classes):
+with suppress(ImportError):
+    from curlify3._req_httpx import AsyncHttpxRequest
+
+    _REQUEST_DATA_CLASSES_ASYNC.append(AsyncHttpxRequest)
+
+
+with suppress(ImportError):
+    from curlify3._req_starlette import StarletteRequest
+
+    _REQUEST_DATA_CLASSES_ASYNC.append(StarletteRequest)
+
+
+def _find_request_data_obj(request, request_data_classes):
     obj = None
     for _cls in request_data_classes:
         try:
@@ -25,16 +36,15 @@ def make_request_data_obj(request, request_data_classes):
         except ValueError:
             continue
     if obj is None:
-        raise ValueError
+        raise ValueError('unknown request object')
     return obj
 
 
-def to_curl(request):
-    data = make_request_data_obj(request, _REQUEST_DATA_CLASSES)
-    return make_curl_string(
-        method=data.method,
-        url=data.url,
-        headers=data.headers,
-        body=data.body(),
-        cookies=data.cookies,
-    )
+def make_request_obj(request):
+    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)
+
+
+def make_request_obj_async(request):
+    if data_obj := _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC):
+        return data_obj
+    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)

@@ -1,14 +1,13 @@
 from pathlib import Path
 
-from fastapi import FastAPI
-
 import fastapi
 import httpx
 import pytest
 import requests
 
-from curlify3 import to_curl
-from curlify3.asyncio import to_curl as async_to_curl
+from fastapi import FastAPI
+
+from curlify3 import to_curl, to_curl_async
 
 _BINARY_ATTACHMENT_PATH = Path(__file__).parent / "image.png"
 _PARAMS = [
@@ -111,7 +110,7 @@ async def test_httpx_async_to_curl(
     req: httpx.Request,
     expected: str,
 ) -> None:
-    results = await async_to_curl(req)
+    results = await to_curl_async(req)
     if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
         boundary = content_type.rsplit("boundary=")[1]
         expected = expected.format(boundary=boundary)
@@ -198,7 +197,7 @@ async def test_httpx_async_to_curl(
 def test_requests_to_curl(
     req: requests.Request,
     expected: str,
-)-> None:
+) -> None:
     prepared = req.prepare()
     results = to_curl(prepared)
     if (content_type := prepared.headers.get("content-type")) and "boundary" in content_type:
@@ -212,13 +211,13 @@ app = FastAPI()
 
 @app.get("/get")
 async def read_root(request: fastapi.Request) -> fastapi.Response:
-    data = await async_to_curl(request)
+    data = await to_curl_async(request)
     return fastapi.Response(content=data)
 
 
 @app.post("/post")
 async def read_root(request: fastapi.Request) -> fastapi.Response:
-    data = await async_to_curl(request)
+    data = await to_curl_async(request)
     return fastapi.Response(content=data)
 
 
@@ -230,11 +229,8 @@ async def read_root(request: fastapi.Request) -> fastapi.Response:
 async def test_starlette_async_to_curl(
     req: httpx.Request,
     expected: str,
-)-> None:
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test/get"
-    ) as client:
+) -> None:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test/get") as client:
         response = await client.send(req)
     assert response.status_code == 200, response.status_code
     results = response.text

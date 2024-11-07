@@ -1,7 +1,7 @@
-from curlify3._utils import to_curl
-from curlify3 import asyncio
+from curlify3._curl import to_curl, to_curl_async
 
+__version__ = "0.1.0"
 __all__ = [
     "to_curl",
-    "asyncio",
+    "to_curl_async",
 ]

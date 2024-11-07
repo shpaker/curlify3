@@ -1,18 +1,12 @@
-from typing import Any, Optional, Union
-
 import httpx
 
-from curlify3._base import BaseRequestData, AsyncBaseRequestData
+from curlify3._base import AsyncBaseRequestData, BaseRequestData
 
 
-class HttpxRequest(
-    BaseRequestData,
-):
+class HttpxRequest(BaseRequestData):
     _instance_of = httpx.Request
 
-    def body(
-        self,
-    ) -> Optional[Union[bytes, str]]:
+    def body(self):
         data = self._request.read()
         try:
             return data.decode()
@@ -21,13 +15,10 @@ class HttpxRequest(
         return data
 
 
-class AsyncHttpxRequest(
-    AsyncBaseRequestData,
-    HttpxRequest,
-):
-    async def body(
-        self,
-    ) -> Optional[Union[bytes, str]]:
+class AsyncHttpxRequest(AsyncBaseRequestData, HttpxRequest):
+    _instance_of = httpx.Request
+
+    async def body(self):
         data = await self._request.aread()
         try:
             return data.decode()

@@ -6,15 +6,17 @@ authors = ["A.Shpak <aleksander.shpak.als@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
-fastapi = "^0.115.4"
+python = ">=3.9,<4.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.10.0"
 requests = "^2.32.3"
 httpx = "^0.27.2"
+fastapi = "^0.115.4"
+isort = "^5.13.2"
+
+[tool.poetry.group.tests.dependencies]
 pytest = "^8.3.3"
-responses = "^0.25.3"
 pytest-asyncio = "^0.24.0"
 pytest-httpx = "^0.33.0"
 
@@ -22,3 +24,11 @@ pytest-httpx = "^0.33.0"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
+[tool.isort]
+line_length = 120
+include_trailing_comma = true
+lines_between_types = 1
+
+[tool.black]
+line-length = 120
+skip-string-normalization = true
