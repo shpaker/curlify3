@@ -3,6 +3,12 @@
 [![PyPI](https://img.shields.io/pypi/v/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
 [![PyPI](https://img.shields.io/pypi/dm/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
 
+### Support request's objects from:
+
+- requests
+- httpx
+- starlette/fastapi
+
 ## Installation
 
 ```sh
