@@ -109,7 +109,7 @@ _PARAMS = [
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
         ),
         "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'image=@image.png' https://httpbin.org/post",
-        id="FILE",
+        id="FILE BIN",
     ),
     pytest.param(
         httpx.Request(
@@ -120,6 +120,15 @@ _PARAMS = [
         ),
         "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
         id="FILE + FORM",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            files={"this-file": open(__file__, "rb")},
+        ),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'this-file=@test_curlify3.py' https://httpbin.org/post",
+        id="FILE TXT",
     ),
 ]
 

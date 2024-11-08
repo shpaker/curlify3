@@ -29,6 +29,7 @@ def make_curl_cookies(cookies):
 
 def make_multipart_curl_args(body):
     body_parts = []
+    body = body.encode() if isinstance(body, str) else body
     for matched in MULTIPART_FORM_DATA.finditer(body):
         groups = matched.groups()
         body_parts.append(f"-F '{groups[0].decode()}={groups[1].decode()}'")
