@@ -1,14 +1,17 @@
 import pathlib
+import sys
 
 from typing import Any
 
 import fastapi
 import httpx
 import pytest
+import pytest_aiohttp
 import requests
-import sys
+
 from aiohttp import web as aiohttp_web
 from aiohttp.test_utils import TestClient
+from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import to_curl, to_curl_async
 
@@ -347,15 +350,14 @@ async def test_starlette_async_to_curl(
 @pytest.mark.asyncio
 async def test_aiohttp_async_to_curl(
     aiohttp_app: aiohttp_web.Application,
-    aiohttp_client,
+    aiohttp_client: AiohttpClient,
     req: dict[str, Any],
     expected: str,
 ) -> None:
-
     additional_headers = (
         f"-H 'accept: */*' -H 'accept-encoding: gzip, deflate' -H 'user-agent: Python/3.{sys.version_info.minor} aiohttp/3.10.10'"
     )
-    client: TestClient = await aiohttp_client(aiohttp_app)
+    client = await aiohttp_client(aiohttp_app)
     response = await client.request(path='/', **req)
     results = await response.text()
     assert response.status == 200, response.status
