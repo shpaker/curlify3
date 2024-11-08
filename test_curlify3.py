@@ -6,7 +6,7 @@ import fastapi
 import httpx
 import pytest
 import requests
-
+import sys
 from aiohttp import web as aiohttp_web
 from aiohttp.test_utils import TestClient
 
@@ -342,8 +342,9 @@ async def test_aiohttp_async_to_curl(
     req: dict[str, Any],
     expected: str,
 ) -> None:
+
     additional_headers = (
-        "-H 'accept: */*' -H 'accept-encoding: gzip, deflate' -H 'user-agent: Python/3.11 aiohttp/3.10.10'"
+        f"-H 'accept: */*' -H 'accept-encoding: gzip, deflate' -H 'user-agent: Python/3.{sys.version_info.minor} aiohttp/3.10.10'"
     )
     client: TestClient = await aiohttp_client(aiohttp_app)
     response = await client.request(path='/', **req)
