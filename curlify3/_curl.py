@@ -38,10 +38,7 @@ def make_multipart_curl_args(body):
     return " ".join(body_parts)
 
 
-def make_curl_body(
-    body,
-    headers,
-):
+def make_curl_body(body, headers):
     if "multipart" in headers.get("content-type", ""):
         return make_multipart_curl_args(body)
     if not body:

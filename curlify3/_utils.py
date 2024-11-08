@@ -23,6 +23,12 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    from curlify3._req_aiohttp import AiohttpServerRequest
+
+    _REQUEST_DATA_CLASSES_ASYNC.append(AiohttpServerRequest)
+
+
+with suppress(ImportError):
     from curlify3._req_starlette import StarletteRequest
 
     _REQUEST_DATA_CLASSES_ASYNC.append(StarletteRequest)
