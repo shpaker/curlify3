@@ -15,7 +15,7 @@ class HttpxRequest(BaseRequestData):
         return data
 
 
-class AsyncHttpxRequest(AsyncBaseRequestData, HttpxRequest):
+class AsyncHttpxRequest(AsyncBaseRequestData):
     _instance_of = httpx.Request
 
     async def body(self):
