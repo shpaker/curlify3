@@ -17,6 +17,12 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    from curlify3._req_flask import FlaskRequest
+
+    _REQUEST_DATA_CLASSES.append(FlaskRequest)
+
+
+with suppress(ImportError):
     from curlify3._req_httpx import AsyncHttpxRequest
 
     _REQUEST_DATA_CLASSES_ASYNC.append(AsyncHttpxRequest)
