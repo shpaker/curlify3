@@ -13,6 +13,7 @@ python = ">=3.8"
 black = "^24.8"
 requests = "^2.32"
 httpx = "^0.24"
+httpx2 = {version = "*", extras = ["http2"]}
 fastapi = "^0.115"
 isort = "^5.13"
 aiohttp = "^3.10"

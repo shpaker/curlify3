@@ -47,13 +47,14 @@ def make_curl_body(body, headers):
     return f"-d '{body}'"
 
 
-def make_curl_string(method, url, headers, body, cookies):
+def make_curl_string(method, url, headers, body, cookies, http2=False):
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
         headers["content-type"] = "plain/text"
     cli_parts = [
         f"curl",
+        "--http2" if http2 else None,
         f"-X {method}" if method != "GET" else None,
         make_curl_cookies(cookies),
         make_curl_headers(headers),
@@ -71,6 +72,7 @@ def to_curl(request):
         headers=data.headers,
         body=data.body(),
         cookies=data.cookies,
+        http2=data.http2,
     )
 
 
@@ -85,4 +87,5 @@ async def to_curl_async(request):
         headers=data.headers,
         body=body,
         cookies=data.cookies,
+        http2=data.http2,
     )

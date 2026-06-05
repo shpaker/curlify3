@@ -5,6 +5,7 @@ from typing import Any
 
 import fastapi
 import httpx
+import httpx2
 import pytest
 import pytest_aiohttp
 import requests
@@ -366,4 +367,77 @@ async def test_aiohttp_async_to_curl(
         additional_headers=additional_headers,
     )
     expected = expected.format(**args)
+    assert results == expected, results
+
+
+_HTTPX2_PARAMS = [
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+        ),
+        "curl --http2 -H 'host: httpbin.org' https://httpbin.org/get",
+        id="HEADER",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            params={"foo": 911, "bar": "baz"},
+        ),
+        "curl --http2 -H 'host: httpbin.org' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        "curl --http2 -b bar=baz -H 'host: httpbin.org' https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            content=b"foo",
+        ),
+        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"bar": "baz"},
+        ),
+        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\":\"baz\"}' https://httpbin.org/post",
+        id="JSON",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _HTTPX2_PARAMS,
+)
+def test_httpx2_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _HTTPX2_PARAMS,
+)
+@pytest.mark.asyncio
+async def test_httpx2_async_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
+    results = await to_curl_async(req)
     assert results == expected, results

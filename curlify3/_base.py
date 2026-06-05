@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class BaseRequestData(ABC):
+    http2 = False
 
     def __init__(self, request) -> None:
         if not isinstance(request, self._instance_of):

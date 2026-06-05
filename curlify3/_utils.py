@@ -23,6 +23,18 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    from curlify3._req_httpx2 import Httpx2Request
+
+    _REQUEST_DATA_CLASSES.append(Httpx2Request)
+
+
+with suppress(ImportError):
+    from curlify3._req_httpx2 import AsyncHttpx2Request
+
+    _REQUEST_DATA_CLASSES_ASYNC.append(AsyncHttpx2Request)
+
+
+with suppress(ImportError):
     from curlify3._req_aiohttp import AiohttpServerRequest
 
     _REQUEST_DATA_CLASSES_ASYNC.append(AiohttpServerRequest)
