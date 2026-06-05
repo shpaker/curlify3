@@ -13,6 +13,7 @@
 - Release workflow (`pypi.yml`) uses `uv build` + `uv publish`.
 - Dropped unused `pytest-httpx` dev dependency.
 - Test expectations updated for `httpx>=0.28` (compact JSON separators) and dynamic `Accept-Encoding`/`User-Agent` capture for aiohttp tests so they stop breaking on aiohttp version bumps.
+- README refreshed: lists `httpx2` in supported clients, documents the Python 3.10+ requirement, adds httpx2 and async usage examples.
 
 ## 0.5 (2024-11-08)
 

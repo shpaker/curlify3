@@ -7,8 +7,11 @@
 
 - requests
 - httpx
+- [httpx2](https://github.com/pydantic/httpx2) (adds `--http2` to the curl)
 - aiohttp server
 - starlette/fastapi
+
+Requires Python 3.10+.
 
 ## Installation
 
@@ -25,4 +28,25 @@ import requests
 response = requests.get("http://google.ru")
 print(to_curl(response.request))
 # curl -H 'user-agent: python-requests/2.32.3' -H 'accept-encoding: gzip, deflate' -H 'accept: */*' -H 'connection: keep-alive' http://www.google.ru/
+```
+
+### httpx2 (HTTP/2)
+
+```py
+import httpx2
+from curlify3 import to_curl
+
+req = httpx2.Request("GET", "https://httpbin.org/get")
+print(to_curl(req))
+# curl --http2 -H 'host: httpbin.org' https://httpbin.org/get
+```
+
+### async
+
+```py
+import asyncio, httpx
+from curlify3 import to_curl_async
+
+req = httpx.Request("POST", "https://httpbin.org/post", json={"a": 1})
+print(asyncio.run(to_curl_async(req)))
 ```
