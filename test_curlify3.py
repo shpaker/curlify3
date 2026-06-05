@@ -3,8 +3,10 @@ import sys
 
 from typing import Any
 
+import aiohttp
 import fastapi
 import httpx
+import httpx2
 import pytest
 import pytest_aiohttp
 import requests
@@ -102,7 +104,7 @@ _PARAMS = [
             url="https://httpbin.org/post",
             json={"bar": "baz"},
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\": \"baz\"}' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\":\"baz\"}' https://httpbin.org/post",
         id="JSON",
     ),
     pytest.param(
@@ -354,16 +356,85 @@ async def test_aiohttp_async_to_curl(
     req: dict[str, Any],
     expected: str,
 ) -> None:
-    additional_headers = (
-        f"-H 'accept: */*' -H 'accept-encoding: gzip, deflate' -H 'user-agent: Python/3.{sys.version_info.minor} aiohttp/3.10.10'"
-    )
     client = await aiohttp_client(aiohttp_app)
     response = await client.request(path='/', **req)
     results = await response.text()
     assert response.status == 200, response.status
+    accept_encoding = response.request_info.headers.get('Accept-Encoding', 'gzip, deflate')
+    user_agent = response.request_info.headers.get('User-Agent', f'Python/3.{sys.version_info.minor} aiohttp/{aiohttp.__version__}')
+    additional_headers = (
+        f"-H 'accept: */*' -H 'accept-encoding: {accept_encoding}' -H 'user-agent: {user_agent}'"
+    )
     args = dict(
         server=f'{client.host}:{client.port}',
         additional_headers=additional_headers,
     )
     expected = expected.format(**args)
+    assert results == expected, results
+
+
+_HTTPX2_PARAMS = [
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+        ),
+        "curl --http2 -H 'host: httpbin.org' https://httpbin.org/get",
+        id="HEADER",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            params={"foo": 911, "bar": "baz"},
+        ),
+        "curl --http2 -H 'host: httpbin.org' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        "curl --http2 -b bar=baz -H 'host: httpbin.org' https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            content=b"foo",
+        ),
+        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        httpx2.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"bar": "baz"},
+        ),
+        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\":\"baz\"}' https://httpbin.org/post",
+        id="JSON",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _HTTPX2_PARAMS,
+)
+def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _HTTPX2_PARAMS,
+)
+@pytest.mark.asyncio
+async def test_httpx2_async_to_curl(req: httpx2.Request, expected: str) -> None:
+    results = await to_curl_async(req)
     assert results == expected, results

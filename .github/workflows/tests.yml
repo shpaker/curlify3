@@ -1,29 +1,30 @@
 ---
-name: Lint
+name: Tests
 
 on:
   pull_request:
     branches: [ main ]
 
 jobs:
-  lint:
+  tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         PYTHON_VERSION:
-          - "3.8"
-          - "3.9"
           - "3.10"
           - "3.11"
           - "3.12"
           - "3.13"
+          - "3.14"
     steps:
+      - uses: actions/checkout@v4
       - uses: extractions/setup-just@v2
-      - uses: actions/setup-python@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.PYTHON_VERSION }}
-      - uses: actions/checkout@v3
-      - run: |
-          python -m pip install poetry~=1.8.4
-          poetry install --no-root --no-ansi
+      - run: uv sync --group dev
       - run: just tests
