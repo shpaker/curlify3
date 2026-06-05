@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.7 (2026-06-05)
+
+### Changed
+- README restructured along Python-packaging best practices: added Features, structured Usage section with per-client examples (`requests`, `httpx` sync/async, `httpx2`, server-side `aiohttp` and `starlette` / `fastapi`), API reference, supported-objects matrix, payload-handling table, and a Development section.
+- Added a comparison table against `curlify` and `curlify2` so users can pick the right package at a glance.
+- Added CI / Python-versions badges to README.
+
+## 0.6 (2026-06-05)
 
 ### Added
 - `httpx2` adapter (sync + async). When the input is an `httpx2.Request`, the generated curl command includes `--http2`. The adapter is fully self-contained so future divergence from `httpx` stays isolated.
