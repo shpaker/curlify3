@@ -4,12 +4,12 @@ tests: pytest
 fmt: isort black
 
 isort:
-  poetry run isort {{ SOURCE_DIR }} --diff
-  poetry run isort test_curlify3.py --diff
+  uv run isort {{ SOURCE_DIR }} --diff
+  uv run isort test_curlify3.py --diff
 
 black:
-  poetry run isort {{ SOURCE_DIR }}
-  poetry run isort test_curlify3.py
+  uv run isort {{ SOURCE_DIR }}
+  uv run isort test_curlify3.py
 
 pytest:
-  poetry run pytest -vv
+  uv run pytest -vv

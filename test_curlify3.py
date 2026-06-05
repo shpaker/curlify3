@@ -3,6 +3,7 @@ import sys
 
 from typing import Any
 
+import aiohttp
 import fastapi
 import httpx
 import httpx2
@@ -103,7 +104,7 @@ _PARAMS = [
             url="https://httpbin.org/post",
             json={"bar": "baz"},
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\": \"baz\"}' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\":\"baz\"}' https://httpbin.org/post",
         id="JSON",
     ),
     pytest.param(
@@ -355,13 +356,15 @@ async def test_aiohttp_async_to_curl(
     req: dict[str, Any],
     expected: str,
 ) -> None:
-    additional_headers = (
-        f"-H 'accept: */*' -H 'accept-encoding: gzip, deflate' -H 'user-agent: Python/3.{sys.version_info.minor} aiohttp/3.10.10'"
-    )
     client = await aiohttp_client(aiohttp_app)
     response = await client.request(path='/', **req)
     results = await response.text()
     assert response.status == 200, response.status
+    accept_encoding = response.request_info.headers.get('Accept-Encoding', 'gzip, deflate')
+    user_agent = response.request_info.headers.get('User-Agent', f'Python/3.{sys.version_info.minor} aiohttp/{aiohttp.__version__}')
+    additional_headers = (
+        f"-H 'accept: */*' -H 'accept-encoding: {accept_encoding}' -H 'user-agent: {user_agent}'"
+    )
     args = dict(
         server=f'{client.host}:{client.port}',
         additional_headers=additional_headers,
@@ -422,10 +425,7 @@ _HTTPX2_PARAMS = [
     "req, expected",
     _HTTPX2_PARAMS,
 )
-def test_httpx2_to_curl(
-    req: httpx2.Request,
-    expected: str,
-) -> None:
+def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
     results = to_curl(req)
     assert results == expected, results
 
@@ -435,9 +435,6 @@ def test_httpx2_to_curl(
     _HTTPX2_PARAMS,
 )
 @pytest.mark.asyncio
-async def test_httpx2_async_to_curl(
-    req: httpx2.Request,
-    expected: str,
-) -> None:
+async def test_httpx2_async_to_curl(req: httpx2.Request, expected: str) -> None:
     results = await to_curl_async(req)
     assert results == expected, results

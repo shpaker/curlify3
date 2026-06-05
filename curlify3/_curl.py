@@ -72,7 +72,7 @@ def to_curl(request):
         headers=data.headers,
         body=data.body(),
         cookies=data.cookies,
-        http2=data.http2,
+        http2=getattr(data, "http2", False),
     )
 
 
@@ -87,5 +87,5 @@ async def to_curl_async(request):
         headers=data.headers,
         body=body,
         cookies=data.cookies,
-        http2=data.http2,
+        http2=getattr(data, "http2", False),
     )
