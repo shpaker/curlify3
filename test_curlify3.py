@@ -8,11 +8,9 @@ import fastapi
 import httpx
 import httpx2
 import pytest
-import pytest_aiohttp
 import requests
 
 from aiohttp import web as aiohttp_web
-from aiohttp.test_utils import TestClient
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
@@ -253,7 +251,9 @@ def test_requests_to_curl(
 ) -> None:
     prepared = req.prepare()
     results = to_curl(prepared)
-    if (content_type := prepared.headers.get("content-type")) and "boundary" in content_type:
+    # requests declares its header values as str | bytes, multipart ones are str
+    content_type = prepared.headers.get("content-type")
+    if isinstance(content_type, str) and "boundary" in content_type:
         boundary = content_type.rsplit("boundary=")[1]
         expected = expected.format(boundary=boundary)
     assert results == expected, results

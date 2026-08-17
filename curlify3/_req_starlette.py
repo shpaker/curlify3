@@ -1,17 +1,13 @@
-from typing import Optional, Union
-
-import starlette
-
 from starlette.requests import Request
 
-from curlify3._base import BaseRequestData
+from curlify3._base import AsyncBaseRequestData
+from curlify3._types import Body
 
 
-class StarletteRequest(BaseRequestData):
-    _instance_of = starlette.requests.Request
+class StarletteRequest(AsyncBaseRequestData[Request]):
+    _instance_of = Request
 
-    async def body(self) -> Optional[Union[bytes, str]]:
-        self._request: starlette.requests.Request
+    async def body(self) -> Body:
         data = await self._request.body()
         try:
             return data.decode()

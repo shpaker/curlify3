@@ -1,7 +1,11 @@
+from collections.abc import Callable, Sequence
 from contextlib import suppress
+from typing import Any, TypeVar
 
-_REQUEST_DATA_CLASSES = []
-_REQUEST_DATA_CLASSES_ASYNC = []
+from curlify3._types import AsyncRequestData, RequestData
+
+_REQUEST_DATA_CLASSES: list[Callable[[Any], RequestData]] = []
+_REQUEST_DATA_CLASSES_ASYNC: list[Callable[[Any], AsyncRequestData]] = []
 
 
 with suppress(ImportError):
@@ -46,23 +50,21 @@ with suppress(ImportError):
     _REQUEST_DATA_CLASSES_ASYNC.append(StarletteRequest)
 
 
-def _find_request_data_obj(request, request_data_classes):
-    obj = None
+_DataT = TypeVar("_DataT")
+
+
+def _find_request_data_obj(request: object, request_data_classes: Sequence[Callable[[Any], _DataT]]) -> _DataT:
     for _cls in request_data_classes:
         try:
-            obj = _cls(request)
+            return _cls(request)
         except ValueError:
             continue
-    if obj is None:
-        raise ValueError('unknown request object')
-    return obj
+    raise ValueError('unknown request object')
 
 
-def make_request_obj(request):
+def make_request_obj(request: object) -> RequestData:
     return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)
 
 
-def make_request_obj_async(request):
-    if data_obj := _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC):
-        return data_obj
-    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)
+def make_request_obj_async(request: object) -> AsyncRequestData:
+    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC)
