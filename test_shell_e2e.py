@@ -181,6 +181,68 @@ def test_sh_pretty_e2e(
     )
 
 
+def write_secret(
+    tmp_path: pathlib.Path,
+) -> pathlib.Path:
+    secret = tmp_path / "secret.txt"
+    secret.write_text("SECRET-FILE-CONTENT", encoding="utf-8")
+    return secret
+
+
+# a value that begins with a character curl reads as a file reference is the case where a
+# wrong option does not fail loudly: the command runs, and sends a local file to the url it
+# was rendered for. Through the server-side adapters the path is the caller's to choose, so
+# these two run the real command against a real file and check the file stays put
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_data_file_reference_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    base_url, captured = capture_server
+    secret = write_secret(tmp_path)
+    # run_and_assert already requires the body to arrive byte for byte, which --data alone
+    # would fail; the explicit check names what must not be in it
+    run_and_assert(
+        base_url,
+        captured,
+        dict(method="POST", url="/post", content=f"@{secret}"),
+        SH,
+        tmp_path / "cmd.sh",
+        ["bash"],
+    )
+    assert b"SECRET-FILE-CONTENT" not in captured[0]["body"]
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+@pytest.mark.parametrize("prefix", ["@", "<"], ids=["LEADING AT", "LEADING LT"])
+def test_sh_multipart_field_file_reference_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    prefix: str,
+) -> None:
+    base_url, captured = capture_server
+    secret = write_secret(tmp_path)
+    value = f"{prefix}{secret}"
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"field": (None, value)})
+    script_path = tmp_path / "cmd.sh"
+    script_path.write_text(to_curl(req, shell=SH), encoding="utf-8")
+    completed = subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+    debug = (completed.returncode, completed.stdout, completed.stderr)
+    assert completed.returncode == 0, debug
+    assert len(captured) == 1, (captured, debug)
+    body = captured[0]["body"]
+    # curl picks its own boundary, so a multipart body cannot be compared byte for byte:
+    # what matters is that the field carries the reference itself and not the file behind it
+    assert value.encode() in body, body
+    assert b"SECRET-FILE-CONTENT" not in body, body
+
+
 @pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets PowerShell on Windows")
 @pytest.mark.parametrize(
     "ps_binary, script_prelude",
