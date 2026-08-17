@@ -14,7 +14,7 @@ from aiohttp import web as aiohttp_web
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
-from curlify3._curl import quote_powershell
+from curlify3._curl import quote_powershell, quote_sh, quote_sh_bytes, quote_sh_word
 
 # imported directly so a broken adapter module fails collection loudly instead
 # of quietly disappearing from the registries under suppress(ImportError)
@@ -100,8 +100,30 @@ _PARAMS = [
             url="https://httpbin.org/post",
             content=b"foo",
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
         id="TEXT",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            content=b"\xff\xfe\x81binary",
+        ),
+        # a body the adapter could not decode: an ANSI-C literal, and --data-raw so that a
+        # body starting with @ is not read by curl as a filename
+        r"curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' "
+        r"--data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        id="BINARY",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"name": "O'Brien"},
+        ),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' "
+        "-d '{\"name\":\"O'\\''Brien\"}' https://httpbin.org/post",
+        id="SINGLE QUOTE",
     ),
     pytest.param(
         httpx.Request(
@@ -227,7 +249,7 @@ async def test_httpx_async_to_curl(
                 url="https://httpbin.org/post",
                 data="foo",
             ),
-            "curl -X POST -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+            "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
             id="TEXT",
         ),
         pytest.param(
@@ -422,7 +444,7 @@ _HTTPX2_PARAMS = [
             url="https://httpbin.org/post",
             content=b"foo",
         ),
-        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'foo' https://httpbin.org/post",
+        "curl --http2 -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
         id="TEXT",
     ),
     pytest.param(
@@ -517,7 +539,7 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             content="it's",
         ),
-        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: plain/text" -d "it\'s" "https://httpbin.org/post"',
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: text/plain" -d "it\'s" "https://httpbin.org/post"',
         id="SINGLE QUOTE",
     ),
     pytest.param(
@@ -573,6 +595,121 @@ async def test_httpx_async_to_curl_powershell(
         boundary = content_type.rsplit("boundary=")[1]
         expected = expected.format(boundary=boundary)
     assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param("plain", "'plain'", id="PLAIN"),
+        pytest.param("", "''", id="EMPTY"),
+        pytest.param("it's", r"'it'\''s'", id="SINGLE QUOTE"),
+        pytest.param("'", r"''\'''", id="ONLY A QUOTE"),
+        pytest.param('{"name": "O\'Brien"}', "'{\"name\": \"O'\\''Brien\"}'", id="JSON SINGLE QUOTE"),
+        # a single-quoted word carries every other metacharacter literally
+        pytest.param("$HOME `id` $(x) a&b;c", "'$HOME `id` $(x) a&b;c'", id="METACHARACTERS"),
+    ],
+)
+def test_quote_sh(
+    value: str,
+    expected: str,
+) -> None:
+    assert quote_sh(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # left bare, which is what keeps the common command readable
+        pytest.param("https://httpbin.org/get", "https://httpbin.org/get", id="URL"),
+        pytest.param("http://127.0.0.1:8000/post", "http://127.0.0.1:8000/post", id="URL WITH PORT"),
+        pytest.param("bar=baz", "bar=baz", id="COOKIE"),
+        # quoted: every one of these breaks or misfires bare
+        pytest.param("https://h/i?limit=10", "'https://h/i?limit=10'", id="QUERY, ZSH GLOB"),
+        pytest.param("https://h/i?a=1&b=2", "'https://h/i?a=1&b=2'", id="QUERY AMPERSAND"),
+        pytest.param("https://h/wiki/Foo_(bar)", "'https://h/wiki/Foo_(bar)'", id="PARENTHESES"),
+        pytest.param("http://h/x;id", "'http://h/x;id'", id="COMMAND SEPARATOR"),
+        pytest.param("n=O'Brien", r"'n=O'\''Brien'", id="COOKIE SINGLE QUOTE"),
+        pytest.param("a b", "'a b'", id="SPACE"),
+        pytest.param("x#y", "'x#y'", id="COMMENT"),
+        pytest.param("", "''", id="EMPTY"),
+    ],
+)
+def test_quote_sh_word(
+    value: str,
+    expected: str,
+) -> None:
+    assert quote_sh_word(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # a mis-encoded text body stays legible: only the byte that did not decode is escaped
+        pytest.param("café".encode("latin-1"), r"$'caf\xe9'", id="LATIN-1 TEXT"),
+        pytest.param(b"\xff\xfe\x81binary", r"$'\xff\xfe\x81binary'", id="BINARY"),
+        pytest.param(b"a'b", r"$'a\'b'", id="SINGLE QUOTE"),
+        pytest.param(b"a\\b", r"$'a\\b'", id="BACKSLASH"),
+        # no literal newline may reach the output or pretty mode's continuation would break
+        pytest.param(b"a\nb", r"$'a\x0ab'", id="NEWLINE"),
+        pytest.param(b"\x7f", r"$'\x7f'", id="DEL"),
+    ],
+)
+def test_quote_sh_bytes(
+    value: bytes,
+    expected: str,
+) -> None:
+    assert quote_sh_bytes(value) == expected
+
+
+def test_quote_sh_bytes_invariants() -> None:
+    # every byte a body can hold except NUL, which make_curl_body refuses outright
+    quoted = quote_sh_bytes(bytes(range(1, 256)))
+    # pure ascii survives being written to a utf-8 script file and pasted into any terminal,
+    # and the absence of a newline is what lets the literal sit on a pretty continuation line
+    assert quoted.isascii(), quoted
+    assert "\n" not in quoted, quoted
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        # a NUL is valid utf-8, so it reaches the builder as text as readily as it does as bytes
+        pytest.param(b"a\x00b", id="DECODES AS TEXT"),
+        pytest.param(b"a\x00\xffb", id="STAYS BYTES"),
+    ],
+)
+def test_to_curl_nul_body(
+    content: bytes,
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content=content)
+    with pytest.raises(ValueError, match="NUL byte"):
+        to_curl(req)
+
+
+def test_to_curl_bytes_body_powershell() -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content=b"\xff\xfe")
+    with pytest.raises(ValueError, match="not valid utf-8"):
+        to_curl(req, shell=POWERSHELL)
+
+
+@pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
+def test_to_curl_bytes_body_option_name(
+    long_options: bool,
+) -> None:
+    # --data-raw has no short form, so the option name is the same either way
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content=b"caf\xe9")
+    assert " --data-raw $'caf\\xe9'" in to_curl(req, long_options=long_options)
+
+
+def test_to_curl_bytes_body_pretty() -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content=b"caf\xe9")
+    assert to_curl(req, pretty=True) == (
+        "curl https://httpbin.org/post \\\n"
+        "  -X POST \\\n"
+        "  -H 'host: httpbin.org' \\\n"
+        "  -H 'content-type: text/plain' \\\n"
+        "  --data-raw $'caf\\xe9'"
+    )
 
 
 @pytest.mark.parametrize(
