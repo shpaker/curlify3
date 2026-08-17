@@ -16,6 +16,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - Faithful rendering of headers, query parameters, cookies (`-b`), and bodies
 - Body payloads: text, JSON, form-encoded, multipart, binary
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
+- One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Zero runtime dependencies
 
 ## Installation
@@ -108,6 +109,31 @@ print(to_curl(req))
 
 `to_curl_async()` works with `httpx2.Request` too.
 
+### Readable output
+
+`pretty=True` puts every option on its own line, and `long_options=True` spells the options out (`--header` instead of `-H`). They are independent, so either can be used alone.
+
+```python
+import requests
+from curlify3 import to_curl
+
+req = requests.Request(
+    "POST",
+    "https://httpbin.org/post",
+    json={"date": "2026-08-10"},
+).prepare()
+
+print(to_curl(req, pretty=True, long_options=True))
+# curl https://httpbin.org/post \
+#   --request POST \
+#   --header 'content-type: application/json' \
+#   --data '{"date": "2026-08-10"}'
+```
+
+The url moves to the first line, where `curl` reads it just as well as in the trailing position — the same layout Chrome DevTools' "Copy as cURL" produces. A request with no options stays on one line.
+
+`pretty=True` is rejected with a `ValueError` for `shell="powershell"`: the `--%` token that dialect relies on is effective only until the next newline, and a backtick cannot extend it, so a multi-line command would be passed to `curl.exe` in pieces.
+
 ### Windows PowerShell
 
 By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get one that pastes into Windows PowerShell 5.1.
@@ -163,17 +189,17 @@ async def echo(request: Request):
 
 ## API
 
-### `to_curl(request, shell="sh") -> str`
+### `to_curl(request, shell="sh", pretty=False, long_options=False) -> str`
 
 Render a request object as a `curl` command. Use for synchronous request types (`requests.PreparedRequest`, `httpx.Request`, `httpx2.Request`).
 
-### `to_curl_async(request, shell="sh") -> str`
+### `to_curl_async(request, shell="sh", pretty=False, long_options=False) -> str`
 
 Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section).
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options.
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized.
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized, or if `pretty=True` is combined with `shell="powershell"`.
 
 ## Supported request objects
 

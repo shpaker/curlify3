@@ -580,3 +580,95 @@ async def test_to_curl_async_unknown_shell() -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get")
     with pytest.raises(ValueError, match="unknown shell"):
         await to_curl_async(req, shell="fish")
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    [
+        pytest.param(
+            httpx.Request(
+                method="GET",
+                url="https://httpbin.org/get",
+            ),
+            "curl https://httpbin.org/get \\\n  -H 'host: httpbin.org'",
+            id="SINGLE OPTION",
+        ),
+        pytest.param(
+            httpx.Request(
+                method="POST",
+                url="https://httpbin.org/post",
+                params={"foo": 911, "bar": "baz"},
+                json={"bar": "baz"},
+            ),
+            "curl 'https://httpbin.org/post?foo=911&bar=baz' \\\n"
+            "  -X POST \\\n"
+            "  -H 'host: httpbin.org' \\\n"
+            "  -H 'content-type: application/json' \\\n"
+            "  -d '{\"bar\":\"baz\"}'",
+            id="JSON",
+        ),
+    ],
+)
+def test_httpx_to_curl_pretty(
+    req: httpx.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req, pretty=True)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    [
+        pytest.param(
+            httpx.Request(
+                method="POST",
+                url="https://httpbin.org/post",
+                json={"bar": "baz"},
+            ),
+            "curl --request POST --header 'host: httpbin.org' --header 'content-type: application/json' "
+            "--data '{\"bar\":\"baz\"}' https://httpbin.org/post",
+            id="JSON",
+        ),
+        pytest.param(
+            httpx.Request(
+                method="POST",
+                url="https://httpbin.org/post",
+                cookies={"bar": "baz"},
+                files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
+            ),
+            "curl --request POST --cookie bar=baz --header 'host: httpbin.org' "
+            "--header 'content-type: multipart/form-data; boundary={boundary}' "
+            "--form 'image=@image.png' https://httpbin.org/post",
+            id="COOKIE + FILE",
+        ),
+    ],
+)
+def test_httpx_to_curl_long_options(
+    req: httpx.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req, long_options=True)
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
+    assert results == expected, results
+
+
+@pytest.mark.asyncio
+async def test_httpx_async_to_curl_pretty_long_options() -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", json={"bar": "baz"})
+    results = await to_curl_async(req, pretty=True, long_options=True)
+    assert results == (
+        "curl https://httpbin.org/post \\\n"
+        "  --request POST \\\n"
+        "  --header 'host: httpbin.org' \\\n"
+        "  --header 'content-type: application/json' \\\n"
+        "  --data '{\"bar\":\"baz\"}'"
+    ), results
+
+
+def test_to_curl_pretty_powershell() -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get")
+    with pytest.raises(ValueError, match="pretty output is not supported"):
+        to_curl(req, shell=POWERSHELL, pretty=True)
