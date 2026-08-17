@@ -1,9 +1,10 @@
 tests: pytest
 lint: format-check check types
 
+# the linter runs first: its fixes can leave code the formatter still has to lay out
 fmt:
-  uv run ruff format .
   uv run ruff check . --fix
+  uv run ruff format .
 
 format-check:
   uv run ruff format --check .

@@ -93,9 +93,7 @@ def make_curl_cookies(cookies: str | None, quote_cookies: Callable[[str], str], 
     return [f"{options['cookie']} {quote_cookies(cookies)}"]
 
 
-def make_multipart_curl_args(body: Body, quote: Quote, options: Options) -> list[str]:
-    if body is None:
-        return []
+def make_multipart_curl_args(body: str | bytes, quote: Quote, options: Options) -> list[str]:
     option = options["form"]
     body_parts = []
     body = body.encode() if isinstance(body, str) else body
@@ -109,10 +107,11 @@ def make_multipart_curl_args(body: Body, quote: Quote, options: Options) -> list
 
 
 def make_curl_body(body: Body, headers: Headers, quote: Quote, options: Options) -> list[str]:
-    if "multipart" in headers.get("content-type", ""):
-        return make_multipart_curl_args(body, quote, options)
+    # an absent body carries no arguments whatever the content-type claims
     if not body:
         return []
+    if "multipart" in headers.get("content-type", ""):
+        return make_multipart_curl_args(body, quote, options)
     return [f"{options['data']} {quote(body)}"]
 
 

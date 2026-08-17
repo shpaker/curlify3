@@ -1,5 +1,3 @@
-from typing import cast
-
 import requests
 
 from curlify3._base import BaseRequestData
@@ -15,7 +13,10 @@ class RequestsRequest(BaseRequestData[requests.PreparedRequest]):
             try:
                 return body.decode()
             except UnicodeDecodeError:
-                pass
-        # requests also accepts an iterable or a file-like object as the body;
-        # rendering those has never been supported, hand it over unchanged
-        return cast(Body, body)
+                return body
+        if body is None or isinstance(body, str):
+            return body
+        # requests also accepts an iterable or a file-like object as the body.
+        # Streaming payloads are not among the supported ones and the object has
+        # no textual form a shell could run, so the command carries no -d.
+        return None

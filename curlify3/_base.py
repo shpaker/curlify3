@@ -6,6 +6,15 @@ from curlify3._types import Body, Headers, RawRequest
 RequestT = TypeVar("RequestT", bound=RawRequest)
 
 
+def _header_value(value: Any) -> str:  # noqa: ANN401
+    # the wrapped header containers disagree on the value type — requests
+    # declares str | bytes — and everything downstream reads header values as
+    # text (`"multipart" in content_type`, `" " in cookies`)
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value if isinstance(value, str) else str(value)
+
+
 class _RequestData(ABC, Generic[RequestT]):
     # the request type the adapter accepts, set by every concrete adapter
     _instance_of: ClassVar[type[Any]]
@@ -26,7 +35,7 @@ class _RequestData(ABC, Generic[RequestT]):
 
     @property
     def headers(self) -> Headers:
-        headers = {name.lower(): value for name, value in dict(self._request.headers).items()}
+        headers = {name.lower(): _header_value(value) for name, value in dict(self._request.headers).items()}
         if self._request.headers.get("cookie"):
             del headers["cookie"]
         return headers
@@ -35,7 +44,7 @@ class _RequestData(ABC, Generic[RequestT]):
     def cookies(self) -> str | None:
         if "cookie" not in self._request.headers:
             return None
-        return self._request.headers.get("cookie")
+        return _header_value(self._request.headers.get("cookie"))
 
 
 # the sync and async bases are siblings on purpose: an async body() cannot
