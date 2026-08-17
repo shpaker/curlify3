@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11 (2026-08-17)
 
 ### Fixed
 - **A value containing a single quote could execute arbitrary commands in the reader's shell.** `sh` output wrapped every value in `'…'` without escaping, so a quote inside a header, cookie, url or body closed the literal and the rest of the value was parsed as shell code. This is reachable from the wire through the server-side adapters, where the request path, cookies and headers are chosen by the client: an incoming `GET /x;id` used to render as `curl … http://host/x;id`, which runs `id` when the developer pastes it out of a log. Every value is now quoted, and the url and cookie header are quoted whenever they hold anything outside the safe character class that `shlex.quote()` uses.
