@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8 (2026-08-17)
+
+### Added
+- Windows PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `to_curl(request, shell="powershell")` and `to_curl_async(request, shell="powershell")` render the command as `curl.exe …` with PowerShell-safe quoting — embedded double quotes become `\"` so JSON payloads survive argument passing to native executables, and single quotes are doubled. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported. Default (`shell="sh"`) output is unchanged.
+
 ## 0.7 (2026-06-05)
 
 ### Changed

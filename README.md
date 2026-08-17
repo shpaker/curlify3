@@ -15,6 +15,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - Works with **client-side** requests (`requests`, `httpx`, `httpx2`) and **server-side** incoming requests (`aiohttp.web`, `starlette` / `fastapi`)
 - Faithful rendering of headers, query parameters, cookies (`-b`), and bodies
 - Body payloads: text, JSON, form-encoded, multipart, binary
+- POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - Zero runtime dependencies
 
 ## Installation
@@ -107,6 +108,26 @@ print(to_curl(req))
 
 `to_curl_async()` works with `httpx2.Request` too.
 
+### Windows PowerShell
+
+By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get a command that pastes cleanly into Windows PowerShell / `pwsh`: the binary becomes `curl.exe` (plain `curl` is an alias for `Invoke-WebRequest` in Windows PowerShell), single quotes are escaped by doubling, and embedded double quotes are escaped as `\"` so JSON payloads survive PowerShell's argument passing to native executables.
+
+```python
+import requests
+from curlify3 import to_curl
+
+req = requests.Request(
+    "POST",
+    "https://httpbin.org/post",
+    json={"date": "2026-08-10"},
+).prepare()
+
+print(to_curl(req, shell="powershell"))
+# curl.exe -X POST -H 'content-type: application/json' -d '{\"date\": \"2026-08-10\"}' https://httpbin.org/post
+```
+
+The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+
 ### `aiohttp` — server-side
 
 Render an incoming request inside a handler. The async variant is required because the body is read from the stream.
@@ -137,15 +158,17 @@ async def echo(request: Request):
 
 ## API
 
-### `to_curl(request) -> str`
+### `to_curl(request, shell="sh") -> str`
 
 Render a request object as a `curl` command. Use for synchronous request types (`requests.PreparedRequest`, `httpx.Request`, `httpx2.Request`).
 
-### `to_curl_async(request) -> str`
+### `to_curl_async(request, shell="sh") -> str`
 
 Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-Both functions raise `ValueError("unknown request object")` if the request type is not recognized.
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell / `pwsh`).
+
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized.
 
 ## Supported request objects
 
