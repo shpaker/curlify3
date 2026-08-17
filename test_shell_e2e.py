@@ -76,6 +76,10 @@ _E2E_REQUESTS = [
         dict(method="POST", url="/post", data={"bar": "baz", "abc": "123"}),
         id="FORM",
     ),
+    pytest.param(
+        dict(method="POST", url="/post", json={"pct": "50% off"}),
+        id="JSON PERCENT",
+    ),
 ]
 
 # sh output does not survive a single quote in the body (pre-existing quoting gap),
@@ -113,9 +117,12 @@ def test_sh_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> Non
     run_and_assert(base_url, captured, request_kwargs, SH, tmp_path / "cmd.sh", ["bash"])
 
 
-@pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets Windows PowerShell 5.1")
+@pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets PowerShell on Windows")
+@pytest.mark.parametrize("ps_binary", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS + _POWERSHELL_ONLY_REQUESTS)
-def test_powershell_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> None:
+def test_powershell_e2e(capture_server, tmp_path, ps_binary: str, request_kwargs: dict[str, Any]) -> None:
+    # both Windows PowerShell 5.1 and pwsh 7.3+, whose native argument passing differs —
+    # the --% stop-parsing token makes the generated command behave identically in both
     base_url, captured = capture_server
     run_and_assert(
         base_url,
@@ -123,5 +130,5 @@ def test_powershell_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]
         request_kwargs,
         POWERSHELL,
         tmp_path / "cmd.ps1",
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"],
+        [ps_binary, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"],
     )

@@ -447,7 +447,7 @@ _POWERSHELL_PARAMS = [
             method="GET",
             url="https://httpbin.org/get",
         ),
-        "curl.exe -H 'host: httpbin.org' 'https://httpbin.org/get'",
+        'curl.exe --% -H "host: httpbin.org" "https://httpbin.org/get"',
         id="HEADER",
     ),
     pytest.param(
@@ -456,7 +456,7 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/get",
             params={"foo": 911, "bar": "baz"},
         ),
-        "curl.exe -H 'host: httpbin.org' 'https://httpbin.org/get?foo=911&bar=baz'",
+        'curl.exe --% -H "host: httpbin.org" "https://httpbin.org/get?foo=911&bar=baz"',
         id="PARAMS",
     ),
     pytest.param(
@@ -465,7 +465,7 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/get",
             cookies={"bar": "baz"},
         ),
-        "curl.exe -b 'bar=baz' -H 'host: httpbin.org' 'https://httpbin.org/get'",
+        'curl.exe --% -b "bar=baz" -H "host: httpbin.org" "https://httpbin.org/get"',
         id="COOKIE",
     ),
     pytest.param(
@@ -474,9 +474,9 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             json={"date": "2026-08-10", "actionReference": "SEND_TOTAL_FLOW_TO_COUNTERPART"},
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/json' "
-        r"-d '{\"date\":\"2026-08-10\",\"actionReference\":\"SEND_TOTAL_FLOW_TO_COUNTERPART\"}' "
-        "'https://httpbin.org/post'",
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/json" '
+        r'-d "{\"date\":\"2026-08-10\",\"actionReference\":\"SEND_TOTAL_FLOW_TO_COUNTERPART\"}" '
+        '"https://httpbin.org/post"',
         id="JSON",
     ),
     pytest.param(
@@ -485,9 +485,9 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             json={"msg": 'say "hi" now'},
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/json' "
-        r"-d '{\"msg\":\"say \\\"hi\\\" now\"}' "
-        "'https://httpbin.org/post'",
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/json" '
+        r'-d "{\"msg\":\"say \\\"hi\\\" now\"}" '
+        '"https://httpbin.org/post"',
         id="ESCAPED QUOTES",
     ),
     pytest.param(
@@ -496,7 +496,7 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             content="it's",
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'it''s' 'https://httpbin.org/post'",
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: plain/text" -d "it\'s" "https://httpbin.org/post"',
         id="SINGLE QUOTE",
     ),
     pytest.param(
@@ -505,8 +505,8 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             data={"bar": "baz", "abc": "123"},
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/x-www-form-urlencoded' "
-        "-d 'bar=baz&abc=123' 'https://httpbin.org/post'",
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/x-www-form-urlencoded" '
+        '-d "bar=baz&abc=123" "https://httpbin.org/post"',
         id="FORM",
     ),
     pytest.param(
@@ -516,8 +516,8 @@ _POWERSHELL_PARAMS = [
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             data={"foo": "bar"},
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' "
-        "-F 'foo=bar' -F 'image=@image.png' 'https://httpbin.org/post'",
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: multipart/form-data; boundary={boundary}" '
+        '-F "foo=bar" -F "image=@image.png" "https://httpbin.org/post"',
         id="FILE + FORM",
     ),
 ]
@@ -557,12 +557,12 @@ async def test_httpx_async_to_curl_powershell(
 @pytest.mark.parametrize(
     "value, expected",
     [
-        pytest.param('{"bar":"baz"}', r"'{\"bar\":\"baz\"}'", id="QUOTES"),
-        pytest.param('{"name": "O\'Brien"}', r"'{\"name\": \"O''Brien\"}'", id="SINGLE QUOTE"),
-        pytest.param(r'{"path": "C:\\x"}', r"'{\"path\": \"C:\\x\"}'", id="BACKSLASHES"),
-        pytest.param(r'x\"y', r"'x\\\"y'", id="BACKSLASH BEFORE QUOTE"),
-        pytest.param("ab\\", r"'ab\'", id="TRAILING BACKSLASH BARE"),
-        pytest.param("a b\\", r"'a b\\'", id="TRAILING BACKSLASH QUOTED"),
+        pytest.param('{"bar":"baz"}', r'"{\"bar\":\"baz\"}"', id="QUOTES"),
+        pytest.param('{"name": "O\'Brien"}', '"{\\"name\\": \\"O\'Brien\\"}"', id="SINGLE QUOTE"),
+        pytest.param(r'{"path": "C:\\x"}', r'"{\"path\": \"C:\\x\"}"', id="BACKSLASHES"),
+        pytest.param(r'x\"y', r'"x\\\"y"', id="BACKSLASH BEFORE QUOTE"),
+        pytest.param("ab\\", r'"ab\\"', id="TRAILING BACKSLASH"),
+        pytest.param("a b\\", r'"a b\\"', id="TRAILING BACKSLASH WITH SPACE"),
     ],
 )
 def test_quote_powershell(value: str, expected: str) -> None:

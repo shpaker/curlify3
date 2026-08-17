@@ -10,7 +10,6 @@ MULTIPART_FILE_DATA = re.compile(rb'form-data; name="(.[^"]+)"; filename="(.[^"]
 
 PS_QUOTE = re.compile(r'(\\*)"')
 PS_TRAILING_BACKSLASHES = re.compile(r"\\+$")
-PS_WHITESPACE = re.compile(r"\s")
 
 SH = "sh"
 POWERSHELL = "powershell"
@@ -29,28 +28,29 @@ def quote_sh_cookies(cookies):
 
 
 def quote_powershell(value):
-    # targets Windows PowerShell 5.1 / pwsh <= 7.2, which pass arguments to native executables
-    # (curl.exe) unescaped, so the value must survive two parsers: MSVCRT command-line rules
-    # first — a double quote becomes \" and any run of backslashes directly before it doubles;
-    # a value with whitespace gets wrapped in "..." on the native command line, so a trailing
-    # backslash run doubles too — then a PowerShell single-quoted literal, where ' doubles
+    # the command is emitted behind the --% stop-parsing token, so the only parser left is the
+    # C runtime of curl.exe: wrap in "...", escape " as \" doubling any run of backslashes
+    # directly before it, and double a trailing run so it cannot swallow the closing quote
     value = PS_QUOTE.sub(lambda matched: matched.group(1) * 2 + '\\"', str(value))
-    if PS_WHITESPACE.search(value):
-        value = PS_TRAILING_BACKSLASHES.sub(lambda matched: matched.group() * 2, value)
-    return "'" + value.replace("'", "''") + "'"
+    value = PS_TRAILING_BACKSLASHES.sub(lambda matched: matched.group() * 2, value)
+    return f'"{value}"'
 
 
 class ShellConfig(NamedTuple):
     binary: str
+    args_prefix: str
     quote: Callable
     quote_url: Callable
     quote_cookies: Callable
 
 
 SHELLS = {
-    SH: ShellConfig("curl", quote_sh, quote_sh_url, quote_sh_cookies),
-    # url and cookies are always quoted: unquoted `,` `;` `$` `(` are PowerShell metacharacters
-    POWERSHELL: ShellConfig("curl.exe", quote_powershell, quote_powershell, quote_powershell),
+    SH: ShellConfig("curl", "", quote_sh, quote_sh_url, quote_sh_cookies),
+    # --% is the PowerShell stop-parsing token: everything after it reaches curl.exe verbatim
+    # (only %VAR% references expand), so the command works identically in Windows PowerShell 5.1
+    # and pwsh 6/7 regardless of their different native argument passing; the url and cookies
+    # are still always quoted to keep whitespace safe for the C runtime parser
+    POWERSHELL: ShellConfig("curl.exe", "--%", quote_powershell, quote_powershell, quote_powershell),
 }
 
 
@@ -97,6 +97,7 @@ def make_curl_string(method, url, headers, body, cookies, http2=False, shell=SH)
         headers["content-type"] = "plain/text"
     cli_parts = [
         shell_conf.binary,
+        shell_conf.args_prefix,
         "--http2" if http2 else None,
         f"-X {method}" if method != "GET" else None,
         make_curl_cookies(cookies, shell_conf.quote_cookies),
