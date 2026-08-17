@@ -32,12 +32,12 @@ Requires **Python 3.10+**.
 
 | | [`curlify`](https://pypi.org/project/curlify/) | [`curlify2`](https://pypi.org/project/curlify2/) | **`curlify3`** |
 | --- | :---: | :---: | :---: |
-| `requests` | [x] | [x] | [x] |
-| `httpx` | [ ] | [x] | [x] |
-| `httpx2` (HTTP/2) | [ ] | [ ] | [x] |
-| `aiohttp` (server-side) | [ ] | [ ] | [x] |
-| `starlette` / `fastapi` (server-side) | [ ] | [ ] | [x] |
-| Async API | [ ] | [ ] | [x] |
+| `requests` | ✅ | ✅ | ✅ |
+| `httpx` | ❌ | ✅ | ✅ |
+| `httpx2` (HTTP/2) | ❌ | ❌ | ✅ |
+| `aiohttp` (server-side) | ❌ | ❌ | ✅ |
+| `starlette` / `fastapi` (server-side) | ❌ | ❌ | ✅ |
+| Async API | ❌ | ❌ | ✅ |
 | Python | 3.7+ | 3.7–3.11 | 3.10+ |
 
 `curlify` is the original and covers only `requests`. `curlify2` added `httpx` but is sync-only, client-side-only, and has not seen a release since 2023. `curlify3` extends the same idea with HTTP/2 (`httpx2`), an async entrypoint, and server-side adapters for `aiohttp` and `starlette` / `fastapi` so you can dump incoming requests as `curl` from inside a handler.
@@ -218,11 +218,11 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 
 | Library | Type | `to_curl` | `to_curl_async` | Notes |
 | --- | --- | :---: | :---: | --- |
-| `requests` | `PreparedRequest` | [x] | [ ] | Pass `Request(...).prepare()` |
-| `httpx` | `httpx.Request` | [x] | [x] | |
-| `httpx2` | `httpx2.Request` | [x] | [x] | Adds `--http2` |
-| `aiohttp` | `aiohttp.web.Request` | [ ] | [x] | Server-side |
-| `starlette` / `fastapi` | `starlette.requests.Request` | [ ] | [x] | Server-side |
+| `requests` | `PreparedRequest` | ✅ | — | Pass `Request(...).prepare()` |
+| `httpx` | `httpx.Request` | ✅ | ✅ | |
+| `httpx2` | `httpx2.Request` | ✅ | ✅ | Adds `--http2` |
+| `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
+| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream |
 
 ## Payload handling
 
