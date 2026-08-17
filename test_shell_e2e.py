@@ -92,11 +92,13 @@ _POWERSHELL_ONLY_REQUESTS = [
 ]
 
 
-def run_and_assert(base_url, captured, request_kwargs, shell, script_path, runner_args, script_prelude=""):
+def run_and_assert(
+    base_url, captured, request_kwargs, shell, script_path, runner_args, script_prelude="", **curl_kwargs
+):
     request_kwargs = dict(request_kwargs)
     request_kwargs["url"] = base_url + request_kwargs["url"]
     req = httpx.Request(**request_kwargs)
-    script_path.write_text(script_prelude + to_curl(req, shell=shell), encoding="utf-8")
+    script_path.write_text(script_prelude + to_curl(req, shell=shell, **curl_kwargs), encoding="utf-8")
     completed = subprocess.run(
         runner_args + [str(script_path)],
         capture_output=True,
@@ -115,6 +117,24 @@ def run_and_assert(base_url, captured, request_kwargs, shell, script_path, runne
 def test_sh_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> None:
     base_url, captured = capture_server
     run_and_assert(base_url, captured, request_kwargs, SH, tmp_path / "cmd.sh", ["bash"])
+
+
+# the line continuations have to survive: bash must see one command, not one per line,
+# and curl must accept the url in the leading position
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+@pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
+def test_sh_pretty_e2e(capture_server, tmp_path, long_options: bool) -> None:
+    base_url, captured = capture_server
+    run_and_assert(
+        base_url,
+        captured,
+        dict(method="POST", url="/post", params={"foo": 911, "bar": "baz"}, json={"msg": "hello world"}),
+        SH,
+        tmp_path / "cmd.sh",
+        ["bash"],
+        pretty=True,
+        long_options=long_options,
+    )
 
 
 @pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets PowerShell on Windows")
