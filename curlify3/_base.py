@@ -6,7 +6,9 @@ from curlify3._types import Body, Headers, RawRequest
 RequestT = TypeVar("RequestT", bound=RawRequest)
 
 
-def _header_value(value: Any) -> str:  # noqa: ANN401
+def _header_value(
+    value: Any,  # noqa: ANN401
+) -> str:
     # the wrapped header containers disagree on the value type — requests
     # declares str | bytes — and everything downstream reads header values as
     # text (`"multipart" in content_type`, `" " in cookies`)
@@ -20,28 +22,39 @@ class _RequestData(ABC, Generic[RequestT]):
     _instance_of: ClassVar[type[Any]]
     http2: ClassVar[bool] = False
 
-    def __init__(self, request: object) -> None:
+    def __init__(
+        self,
+        request: object,
+    ) -> None:
         if not isinstance(request, self._instance_of):
             raise ValueError
         self._request = cast(RequestT, request)
 
     @property
-    def url(self) -> str:
+    def url(
+        self,
+    ) -> str:
         return str(self._request.url)
 
     @property
-    def method(self) -> str:
+    def method(
+        self,
+    ) -> str:
         return self._request.method
 
     @property
-    def headers(self) -> Headers:
+    def headers(
+        self,
+    ) -> Headers:
         headers = {name.lower(): _header_value(value) for name, value in dict(self._request.headers).items()}
         if self._request.headers.get("cookie"):
             del headers["cookie"]
         return headers
 
     @property
-    def cookies(self) -> str | None:
+    def cookies(
+        self,
+    ) -> str | None:
         if "cookie" not in self._request.headers:
             return None
         return _header_value(self._request.headers.get("cookie"))
@@ -51,11 +64,15 @@ class _RequestData(ABC, Generic[RequestT]):
 # override a sync one, and the starlette adapter needs the async variant
 class BaseRequestData(_RequestData[RequestT], ABC):
     @abstractmethod
-    def body(self) -> Body:
+    def body(
+        self,
+    ) -> Body:
         raise NotImplementedError
 
 
 class AsyncBaseRequestData(_RequestData[RequestT], ABC):
     @abstractmethod
-    async def body(self) -> Body:
+    async def body(
+        self,
+    ) -> Body:
         raise NotImplementedError

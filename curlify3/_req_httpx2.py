@@ -9,7 +9,9 @@ class Httpx2Request(BaseRequestData[httpx2.Request]):
     # renders as curl --http2
     http2 = True
 
-    def body(self) -> Body:
+    def body(
+        self,
+    ) -> Body:
         data = self._request.read()
         try:
             return data.decode()
@@ -22,7 +24,9 @@ class AsyncHttpx2Request(AsyncBaseRequestData[httpx2.Request]):
     _instance_of = httpx2.Request
     http2 = True
 
-    async def body(self) -> Body:
+    async def body(
+        self,
+    ) -> Body:
         data = await self._request.aread()
         try:
             return data.decode()

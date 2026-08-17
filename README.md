@@ -239,6 +239,8 @@ just fmt     # ruff format, ruff check --fix
 
 Formatting and linting are handled by [`ruff`](https://docs.astral.sh/ruff/), type checking by [`ty`](https://docs.astral.sh/ty/).
 
+One convention the tooling cannot enforce on its own: every parameter of a function goes on its own line, which means every parameter list ends with a trailing comma. Write the comma and the formatter keeps the layout.
+
 CI runs the linter and the type checker on every pull request, and the test suite on Python 3.10–3.14.
 
 ## Changelog

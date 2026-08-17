@@ -8,27 +8,41 @@ Headers: TypeAlias = dict[str, str]
 class _CommonRequestData(Protocol):
     # everything the curl builder needs from an adapter except the body
     @property
-    def http2(self) -> bool: ...
+    def http2(
+        self,
+    ) -> bool: ...
 
     @property
-    def url(self) -> str: ...
+    def url(
+        self,
+    ) -> str: ...
 
     @property
-    def method(self) -> str: ...
+    def method(
+        self,
+    ) -> str: ...
 
     @property
-    def headers(self) -> Headers: ...
+    def headers(
+        self,
+    ) -> Headers: ...
 
     @property
-    def cookies(self) -> str | None: ...
+    def cookies(
+        self,
+    ) -> str | None: ...
 
 
 class RequestData(_CommonRequestData, Protocol):
-    def body(self) -> Body: ...
+    def body(
+        self,
+    ) -> Body: ...
 
 
 class AsyncRequestData(_CommonRequestData, Protocol):
-    async def body(self) -> Body: ...
+    async def body(
+        self,
+    ) -> Body: ...
 
 
 class RawRequest(Protocol):
@@ -37,10 +51,16 @@ class RawRequest(Protocol):
     # one brings its own url and headers containers), so these three stay Any
     # and the adapters normalise whatever comes out of them
     @property
-    def url(self) -> Any: ...  # noqa: ANN401
+    def url(
+        self,
+    ) -> Any: ...  # noqa: ANN401
 
     @property
-    def method(self) -> Any: ...  # noqa: ANN401
+    def method(
+        self,
+    ) -> Any: ...  # noqa: ANN401
 
     @property
-    def headers(self) -> Any: ...  # noqa: ANN401
+    def headers(
+        self,
+    ) -> Any: ...  # noqa: ANN401

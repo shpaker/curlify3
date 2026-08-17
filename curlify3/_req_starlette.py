@@ -7,7 +7,9 @@ from curlify3._types import Body
 class StarletteRequest(AsyncBaseRequestData[Request]):
     _instance_of = Request
 
-    async def body(self) -> Body:
+    async def body(
+        self,
+    ) -> Body:
         data = await self._request.body()
         try:
             return data.decode()

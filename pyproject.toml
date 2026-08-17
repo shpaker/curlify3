@@ -63,6 +63,11 @@ lines-between-types = 1
 quote-style = "preserve"
 # the README snippets are illustrative, keep them compact
 exclude = ["*.md"]
+# every parameter of a function goes on its own line, so every parameter list
+# ends with a trailing comma. Nothing in ruff can require that of a signature
+# written on one line, but the magic trailing comma keeps the ones that are
+# already written that way from being collapsed back — leave it enabled.
+skip-magic-trailing-comma = false
 
 [tool.ty.environment]
 python-version = "3.10"

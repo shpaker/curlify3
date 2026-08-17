@@ -57,7 +57,10 @@ with suppress(ImportError):
 _DataT = TypeVar("_DataT")
 
 
-def _find_request_data_obj(request: object, request_data_classes: Sequence[Callable[[Any], _DataT]]) -> _DataT:
+def _find_request_data_obj(
+    request: object,
+    request_data_classes: Sequence[Callable[[Any], _DataT]],
+) -> _DataT:
     for _cls in request_data_classes:
         try:
             return _cls(request)
@@ -66,9 +69,13 @@ def _find_request_data_obj(request: object, request_data_classes: Sequence[Calla
     raise ValueError('unknown request object')
 
 
-def make_request_obj(request: object) -> RequestData:
+def make_request_obj(
+    request: object,
+) -> RequestData:
     return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)
 
 
-def make_request_obj_async(request: object) -> AsyncRequestData:
+def make_request_obj_async(
+    request: object,
+) -> AsyncRequestData:
     return _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC)

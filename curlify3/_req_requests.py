@@ -7,7 +7,9 @@ from curlify3._types import Body
 class RequestsRequest(BaseRequestData[requests.PreparedRequest]):
     _instance_of = requests.PreparedRequest
 
-    def body(self) -> Body:
+    def body(
+        self,
+    ) -> Body:
         body = self._request.body
         if isinstance(body, bytes):
             try:

@@ -35,19 +35,27 @@ LONG_OPTIONS: Final[Options] = {
 }
 
 
-def quote_sh(value: str | bytes) -> str:
+def quote_sh(
+    value: str | bytes,
+) -> str:
     return f"'{value}'"
 
 
-def quote_sh_url(url: str) -> str:
+def quote_sh_url(
+    url: str,
+) -> str:
     return url if "&" not in url else quote_sh(url)
 
 
-def quote_sh_cookies(cookies: str) -> str:
+def quote_sh_cookies(
+    cookies: str,
+) -> str:
     return quote_sh(cookies) if " " in cookies else cookies
 
 
-def quote_powershell(value: str | bytes) -> str:
+def quote_powershell(
+    value: str | bytes,
+) -> str:
     # the command is emitted behind the --% stop-parsing token, so the only parser left is the
     # C runtime of curl.exe: wrap in "...", escape " as \" doubling any run of backslashes
     # directly before it, and double a trailing run so it cannot swallow the closing quote
@@ -82,18 +90,30 @@ SHELLS: Final[Mapping[str, ShellConfig]] = {
 }
 
 
-def make_curl_headers(headers: Headers, quote: Quote, options: Options) -> list[str]:
+def make_curl_headers(
+    headers: Headers,
+    quote: Quote,
+    options: Options,
+) -> list[str]:
     option = options["header"]
     return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items()]
 
 
-def make_curl_cookies(cookies: str | None, quote_cookies: Callable[[str], str], options: Options) -> list[str]:
+def make_curl_cookies(
+    cookies: str | None,
+    quote_cookies: Callable[[str], str],
+    options: Options,
+) -> list[str]:
     if not cookies:
         return []
     return [f"{options['cookie']} {quote_cookies(cookies)}"]
 
 
-def make_multipart_curl_args(body: str | bytes, quote: Quote, options: Options) -> list[str]:
+def make_multipart_curl_args(
+    body: str | bytes,
+    quote: Quote,
+    options: Options,
+) -> list[str]:
     option = options["form"]
     body_parts = []
     body = body.encode() if isinstance(body, str) else body
@@ -106,7 +126,12 @@ def make_multipart_curl_args(body: str | bytes, quote: Quote, options: Options) 
     return body_parts
 
 
-def make_curl_body(body: Body, headers: Headers, quote: Quote, options: Options) -> list[str]:
+def make_curl_body(
+    body: Body,
+    headers: Headers,
+    quote: Quote,
+    options: Options,
+) -> list[str]:
     # an absent body carries no arguments whatever the content-type claims
     if not body:
         return []
@@ -153,7 +178,12 @@ def make_curl_string(
     return " ".join([command, *parts, url])
 
 
-def to_curl(request: object, shell: str = SH, pretty: bool = False, long_options: bool = False) -> str:
+def to_curl(
+    request: object,
+    shell: str = SH,
+    pretty: bool = False,
+    long_options: bool = False,
+) -> str:
     data = make_request_obj(request)
     return make_curl_string(
         method=data.method,
@@ -168,7 +198,12 @@ def to_curl(request: object, shell: str = SH, pretty: bool = False, long_options
     )
 
 
-async def to_curl_async(request: object, shell: str = SH, pretty: bool = False, long_options: bool = False) -> str:
+async def to_curl_async(
+    request: object,
+    shell: str = SH,
+    pretty: bool = False,
+    long_options: bool = False,
+) -> str:
     data = make_request_obj_async(request)
     return make_curl_string(
         method=data.method,

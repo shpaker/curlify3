@@ -30,7 +30,9 @@ from curlify3._utils import _REQUEST_DATA_CLASSES, _REQUEST_DATA_CLASSES_ASYNC
 def aiohttp_app() -> aiohttp_web.Application:
     aiohttp_app = aiohttp_web.Application()
 
-    async def hello(request: aiohttp_web.Request) -> aiohttp_web.Response:
+    async def hello(
+        request: aiohttp_web.Request,
+    ) -> aiohttp_web.Response:
         try:
             data = await to_curl_async(request)
         except Exception as exc:
@@ -48,12 +50,16 @@ def fastapi_app() -> fastapi.FastAPI:
     app = fastapi.FastAPI()
 
     @app.get("/get")
-    async def get(request: fastapi.Request) -> fastapi.Response:
+    async def get(
+        request: fastapi.Request,
+    ) -> fastapi.Response:
         data = await to_curl_async(request)
         return fastapi.Response(content=data)
 
     @app.post("/post")
-    async def post(request: fastapi.Request) -> fastapi.Response:
+    async def post(
+        request: fastapi.Request,
+    ) -> fastapi.Response:
         data = await to_curl_async(request)
         return fastapi.Response(content=data)
 
@@ -435,7 +441,10 @@ _HTTPX2_PARAMS = [
     "req, expected",
     _HTTPX2_PARAMS,
 )
-def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
+def test_httpx2_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
     results = to_curl(req)
     assert results == expected, results
 
@@ -445,7 +454,10 @@ def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
     _HTTPX2_PARAMS,
 )
 @pytest.mark.asyncio
-async def test_httpx2_async_to_curl(req: httpx2.Request, expected: str) -> None:
+async def test_httpx2_async_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
     results = await to_curl_async(req)
     assert results == expected, results
 
@@ -574,7 +586,10 @@ async def test_httpx_async_to_curl_powershell(
         pytest.param("a b\\", r'"a b\\"', id="TRAILING BACKSLASH WITH SPACE"),
     ],
 )
-def test_quote_powershell(value: str, expected: str) -> None:
+def test_quote_powershell(
+    value: str,
+    expected: str,
+) -> None:
     assert quote_powershell(value) == expected
 
 

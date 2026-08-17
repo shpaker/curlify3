@@ -30,7 +30,9 @@ def capture_server() -> Iterator[CaptureServer]:
     captured: list[dict[str, Any]] = []
 
     class CaptureHandler(BaseHTTPRequestHandler):
-        def _capture(self) -> None:
+        def _capture(
+            self,
+        ) -> None:
             length = int(self.headers.get("content-length") or 0)
             captured.append(
                 {
@@ -48,7 +50,11 @@ def capture_server() -> Iterator[CaptureServer]:
         do_POST = _capture
 
         # the signature mirrors BaseHTTPRequestHandler.log_message, Any included
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: ANN401
+        def log_message(
+            self,
+            format: str,
+            *args: Any,  # noqa: ANN401
+        ) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureHandler)
@@ -128,7 +134,11 @@ def run_and_assert(
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
 @pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS)
-def test_sh_e2e(capture_server: CaptureServer, tmp_path: pathlib.Path, request_kwargs: dict[str, Any]) -> None:
+def test_sh_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    request_kwargs: dict[str, Any],
+) -> None:
     base_url, captured = capture_server
     run_and_assert(base_url, captured, request_kwargs, SH, tmp_path / "cmd.sh", ["bash"])
 
@@ -137,7 +147,11 @@ def test_sh_e2e(capture_server: CaptureServer, tmp_path: pathlib.Path, request_k
 # and curl must accept the url in the leading position
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
 @pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
-def test_sh_pretty_e2e(capture_server: CaptureServer, tmp_path: pathlib.Path, long_options: bool) -> None:
+def test_sh_pretty_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    long_options: bool,
+) -> None:
     base_url, captured = capture_server
     run_and_assert(
         base_url,
