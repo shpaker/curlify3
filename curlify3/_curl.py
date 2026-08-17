@@ -6,8 +6,10 @@ from typing import Final, NamedTuple, TypeAlias
 from curlify3._types import Body, Headers
 from curlify3._utils import make_request_obj, make_request_obj_async
 
-# a quote function also has to survive a body that did not decode
-Quote: TypeAlias = Callable[[str | bytes], str]
+# a body that did not decode never reaches a text quote function: it goes through
+# the dialect's quote_bytes instead, see make_curl_body
+Quote: TypeAlias = Callable[[str], str]
+BytesQuote: TypeAlias = Callable[[bytes], str]
 Options: TypeAlias = Mapping[str, str]
 
 MULTIPART_FORM_DATA: Final = re.compile(rb'form-data; name="(.[^"]+)"\r\n\r\n(.+)\r\n')
@@ -15,6 +17,13 @@ MULTIPART_FILE_DATA: Final = re.compile(rb'form-data; name="(.[^"]+)"; filename=
 
 PS_QUOTE: Final = re.compile(r'(\\*)"')
 PS_TRAILING_BACKSLASHES: Final = re.compile(r"\\+$")
+
+# the character class shlex.quote() treats as safe: no shell metacharacter, no glob
+# character, no whitespace. A value holding anything else is quoted, which still leaves
+# a plain url and a lone cookie pair bare and keeps the common command terse
+SH_UNSAFE: Final = re.compile(r"[^\w@%+=:,./-]", re.ASCII)
+# inside $'...' these two are the only characters that carry meaning
+SH_BYTE_ESCAPES: Final[Mapping[int, str]] = {0x27: "\\'", 0x5C: "\\\\"}
 
 SH: Final = "sh"
 POWERSHELL: Final = "powershell"
@@ -24,6 +33,8 @@ SHORT_OPTIONS: Final[Options] = {
     "header": "-H",
     "cookie": "-b",
     "data": "-d",
+    # curl has no short form of --data-raw, hence the same string in both maps
+    "data_raw": "--data-raw",
     "form": "-F",
 }
 LONG_OPTIONS: Final[Options] = {
@@ -31,51 +42,84 @@ LONG_OPTIONS: Final[Options] = {
     "header": "--header",
     "cookie": "--cookie",
     "data": "--data",
+    "data_raw": "--data-raw",
     "form": "--form",
 }
 
 
 def quote_sh(
-    value: str | bytes,
+    value: str,
 ) -> str:
-    return f"'{value}'"
+    # close the literal, emit an escaped quote, reopen it: the quote that ends the word
+    # is the only character a single-quoted sh word cannot carry
+    return "'" + value.replace("'", "'\\''") + "'"
 
 
-def quote_sh_url(
-    url: str,
+def quote_sh_word(
+    value: str,
 ) -> str:
-    return url if "&" not in url else quote_sh(url)
+    # a url and a cookie header are normally made of safe characters, and leaving them
+    # bare is what keeps the command readable. Everything else is quoted — including the
+    # ? of a single-parameter query string, which zsh would otherwise refuse as a glob
+    if not value:
+        return "''"
+    return quote_sh(value) if SH_UNSAFE.search(value) else value
 
 
-def quote_sh_cookies(
-    cookies: str,
+def _escape_sh_byte(
+    byte: int,
 ) -> str:
-    return quote_sh(cookies) if " " in cookies else cookies
+    if byte in SH_BYTE_ESCAPES:
+        return SH_BYTE_ESCAPES[byte]
+    if 0x20 <= byte <= 0x7E:
+        return chr(byte)
+    return f"\\x{byte:02x}"
+
+
+def quote_sh_bytes(
+    value: bytes,
+) -> str:
+    # $'...' is ANSI-C quoting: bash, zsh and ksh expand the escapes, POSIX sh does not.
+    # Escaping only the bytes that have to be escaped keeps a mis-encoded text body legible,
+    # and leaves the command pure ascii with no newline in it, which pretty output relies on
+    return "$'" + "".join(_escape_sh_byte(byte) for byte in value) + "'"
 
 
 def quote_powershell(
-    value: str | bytes,
+    value: str,
 ) -> str:
     # the command is emitted behind the --% stop-parsing token, so the only parser left is the
     # C runtime of curl.exe: wrap in "...", escape " as \" doubling any run of backslashes
     # directly before it, and double a trailing run so it cannot swallow the closing quote
-    quoted = PS_QUOTE.sub(lambda matched: matched.group(1) * 2 + '\\"', str(value))
+    quoted = PS_QUOTE.sub(lambda matched: matched.group(1) * 2 + '\\"', value)
     quoted = PS_TRAILING_BACKSLASHES.sub(lambda matched: matched.group() * 2, quoted)
     return f'"{quoted}"'
+
+
+def quote_powershell_bytes(
+    value: bytes,
+) -> str:
+    raise ValueError(
+        "a body that is not valid utf-8 cannot be rendered for shell 'powershell': raw bytes "
+        "have no spelling behind the --% stop-parsing token, use shell='sh' instead"
+    )
 
 
 class ShellConfig(NamedTuple):
     binary: str
     args_prefix: str
+    # quotes unconditionally: header values and a text body
     quote: Quote
-    quote_url: Callable[[str], str]
-    quote_cookies: Callable[[str], str]
+    # quotes only a value that needs it: the url and the cookie header
+    quote_word: Quote
+    # a body the adapter could not decode; raises when the dialect cannot spell raw bytes
+    quote_bytes: BytesQuote
     # what separates arguments in pretty mode, None when the shell cannot span lines
     pretty_separator: str | None
 
 
 SHELLS: Final[Mapping[str, ShellConfig]] = {
-    SH: ShellConfig("curl", "", quote_sh, quote_sh_url, quote_sh_cookies, " \\\n  "),
+    SH: ShellConfig("curl", "", quote_sh, quote_sh_word, quote_sh_bytes, " \\\n  "),
     # --% is the stop-parsing token: Windows PowerShell 5.1 (the dialect's target) hands
     # everything after it to curl.exe verbatim (only %VAR% references expand), leaving the
     # C runtime as the single parser — 5.1's own argument binder re-quotes by counting every
@@ -86,7 +130,7 @@ SHELLS: Final[Mapping[str, ShellConfig]] = {
     # pretty is impossible here: --% is effective only until the next newline and the line
     # continuation character (`) cannot extend it (about_Parsing), so a multi-line command
     # would pass the backtick to curl.exe and run the next line on its own
-    POWERSHELL: ShellConfig("curl.exe", "--%", quote_powershell, quote_powershell, quote_powershell, None),
+    POWERSHELL: ShellConfig("curl.exe", "--%", quote_powershell, quote_powershell, quote_powershell_bytes, None),
 }
 
 
@@ -101,12 +145,12 @@ def make_curl_headers(
 
 def make_curl_cookies(
     cookies: str | None,
-    quote_cookies: Callable[[str], str],
+    quote_word: Quote,
     options: Options,
 ) -> list[str]:
     if not cookies:
         return []
-    return [f"{options['cookie']} {quote_cookies(cookies)}"]
+    return [f"{options['cookie']} {quote_word(cookies)}"]
 
 
 def make_multipart_curl_args(
@@ -130,13 +174,30 @@ def make_curl_body(
     body: Body,
     headers: Headers,
     quote: Quote,
+    quote_bytes: BytesQuote,
     options: Options,
 ) -> list[str]:
     # an absent body carries no arguments whatever the content-type claims
     if not body:
         return []
+    # multipart comes first: such a body arrives as bytes whenever one of its file parts
+    # is binary, and the parts are matched and decoded individually below
     if "multipart" in headers.get("content-type", ""):
         return make_multipart_curl_args(body, quote, options)
+    # a command-line argument is NUL-terminated on every platform, so a NUL byte in the body
+    # would silently truncate it, and a command that runs while sending something other than
+    # the request it was rendered from is worse than one that refuses to be rendered. A NUL is
+    # valid utf-8, so it arrives here as text as readily as it does as bytes. The multipart
+    # branch above is exempt: it renders part names and filenames, never the file bytes
+    if (0 in body) if isinstance(body, bytes) else ("\x00" in body):
+        raise ValueError(
+            "a body containing a NUL byte cannot be rendered as a curl command: a command-line "
+            "argument is NUL-terminated, so the byte would silently truncate the body"
+        )
+    if isinstance(body, bytes):
+        # the adapter could not decode it. --data-raw rather than --data, because both
+        # --data and --data-binary would read a leading @ as a filename to read instead
+        return [f"{options['data_raw']} {quote_bytes(body)}"]
     return [f"{options['data']} {quote(body)}"]
 
 
@@ -158,21 +219,23 @@ def make_curl_string(
     separator = shell_conf.pretty_separator if pretty else None
     if pretty and separator is None:
         raise ValueError(f"pretty output is not supported for shell: {shell!r}")
+    # the other two rejections live in SHELLS, in the quote functions of the dialect that
+    # cannot render the value: a NUL byte in any shell, and raw bytes in powershell
     options = LONG_OPTIONS if long_options else SHORT_OPTIONS
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
-        headers["content-type"] = "plain/text"
+        headers["content-type"] = "text/plain"
     args = [
         "--http2" if http2 else None,
         f"{options['request']} {method}" if method != "GET" else None,
-        *make_curl_cookies(cookies, shell_conf.quote_cookies, options),
+        *make_curl_cookies(cookies, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options),
-        *make_curl_body(body, headers, shell_conf.quote, options),
+        *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
     ]
     parts = [str(entity) for entity in args if entity]
     command = " ".join([part for part in (shell_conf.binary, shell_conf.args_prefix) if part])
-    url = shell_conf.quote_url(url)
+    url = shell_conf.quote_word(url)
     if separator is not None:
         return separator.join([f"{command} {url}", *parts])
     return " ".join([command, *parts, url])

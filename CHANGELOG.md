@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11 (2026-08-17)
+
+### Fixed
+- **A value containing a single quote could execute arbitrary commands in the reader's shell.** `sh` output wrapped every value in `'…'` without escaping, so a quote inside a header, cookie, url or body closed the literal and the rest of the value was parsed as shell code. This is reachable from the wire through the server-side adapters, where the request path, cookies and headers are chosen by the client: an incoming `GET /x;id` used to render as `curl … http://host/x;id`, which runs `id` when the developer pastes it out of a log. Every value is now quoted, and the url and cookie header are quoted whenever they hold anything outside the safe character class that `shlex.quote()` uses.
+- A url with a single query parameter is now quoted. It has no `&`, so it used to be emitted bare, and `zsh` — the default shell on macOS — refuses the bare `?` as an unmatched glob with `no matches found`, so the command did not run at all.
+- A body that is not valid UTF-8 is rendered as `--data-raw $'\xff\xfe'` instead of the Python `repr` of the `bytes` object inside `-d '…'`, which produced a command that could not run. The escape form is ANSI-C quoting: `bash`, `zsh` and `ksh` expand it, POSIX `sh` does not, and only the bytes that have to be escaped are, so a mis-encoded text body stays readable as `$'caf\xe9'`. `--data-raw` rather than `-d`, because both `-d` and `--data-binary` read a leading `@` as a filename to load the body from. The same body with `shell="powershell"` now raises `ValueError`: raw bytes cannot be spelled behind the `--%` stop-parsing token.
+- A body containing a NUL byte raises `ValueError` instead of rendering a command that runs and sends a truncated body. A command-line argument is NUL-terminated, so no quoting can carry one. A NUL is valid UTF-8, so this is checked on the text path as well as the `bytes` one; a multipart body is unaffected, since only its part names and filenames are rendered.
+- The `Content-Type` fallback for a body sent without one is `text/plain`, not the reversed `plain/text`.
+
+### Added
+- End-to-end coverage for the cases above: the single-quoted payload now runs under `bash` as well as PowerShell, and two new `sh` cases replay a body of every byte value except NUL, and a body starting with `@`, byte-for-byte through a real shell.
+- `LICENSE` (MIT) and trove classifiers. The package was published without either; the `pyversions` badge in the README rendered as `python missing` because the classifiers it reads were absent.
+
 ## 0.10 (2026-08-17)
 
 ### Added

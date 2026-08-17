@@ -41,7 +41,6 @@ jobs:
           - "3.14"
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v4
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -49,7 +48,10 @@ jobs:
         with:
           python-version: ${{ matrix.PYTHON_VERSION }}
       - run: uv sync --group dev
-      - run: just tests
+      # pytest directly rather than `just tests`: installing just needs the release list
+      # of casey/just, which the github api currently returns empty, and the lint and
+      # windows jobs already call their tools without the recipe indirection
+      - run: uv run pytest -vv
 
   tests-windows:
     # verifies the powershell dialect end-to-end with the real powershell.exe 5.1 (test_shell_e2e.py);

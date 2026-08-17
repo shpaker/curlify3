@@ -92,14 +92,30 @@ _E2E_REQUESTS = [
         dict(method="POST", url="/post", json={"pct": "50% off"}),
         id="JSON PERCENT",
     ),
-]
-
-# sh output does not survive a single quote in the body (pre-existing quoting gap),
-# so this payload is exercised for the powershell dialect only
-_POWERSHELL_ONLY_REQUESTS = [
     pytest.param(
         dict(method="POST", url="/post", json={"name": "O'Brien"}),
         id="JSON SINGLE QUOTE",
+    ),
+    pytest.param(
+        dict(method="POST", url="/post", params={"limit": 10}, json={"ok": True}),
+        # a single-parameter query string has no & to force quoting, and zsh refuses the
+        # bare ? as an unmatched glob
+        id="URL SINGLE PARAM",
+    ),
+]
+
+# $'...' is ANSI-C quoting, which bash, zsh and ksh expand and powershell has no answer for,
+# so a body that did not decode is exercised for the sh dialect only
+_SH_ONLY_REQUESTS = [
+    pytest.param(
+        # every byte a body can hold except NUL, which cannot survive in an argument at all
+        dict(method="POST", url="/post", content=bytes(range(1, 256))),
+        id="RAW BYTES",
+    ),
+    pytest.param(
+        # the leading @ that --data and --data-binary would read as a filename
+        dict(method="POST", url="/post", content=b"@\xff\xfe"),
+        id="RAW BYTES LEADING AT",
     ),
 ]
 
@@ -133,7 +149,7 @@ def run_and_assert(
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
-@pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS)
+@pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS + _SH_ONLY_REQUESTS)
 def test_sh_e2e(
     capture_server: CaptureServer,
     tmp_path: pathlib.Path,
@@ -176,7 +192,7 @@ def test_sh_pretty_e2e(
         pytest.param("pwsh", "$PSNativeCommandArgumentPassing = 'Legacy'\n", id="pwsh-legacy"),
     ],
 )
-@pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS + _POWERSHELL_ONLY_REQUESTS)
+@pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS)
 def test_powershell_e2e(
     capture_server: CaptureServer,
     tmp_path: pathlib.Path,
