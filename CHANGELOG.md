@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10 (2026-08-17)
+
+### Added
+- Type annotations across the whole package, and a `py.typed` marker so they are visible to type checkers in projects that depend on `curlify3` (PEP 561). `to_curl()` / `to_curl_async()` are declared as returning `str` and accepting `shell`, `pretty` and `long_options`; the `ValueError` contract for an unknown `shell` value is unchanged, so `shell` stays a plain `str`.
+- [`ty`](https://docs.astral.sh/ty/) as the type checker and a `lint` CI job that runs it together with `ruff` on every pull request and on pushes to `main`.
+- Dependabot configuration for `uv` (`pyproject.toml` + `uv.lock`) and for GitHub Actions, weekly and grouped so tooling and test dependencies arrive as separate pull requests.
+
+### Changed
+- [`ruff`](https://docs.astral.sh/ruff/) replaces `black` and `isort`, which were declared as dev dependencies but never enforced anywhere. The formatting rules are carried over: line length 120, preserved string quotes, one blank line between plain and `from` imports.
+- The sync and async request-data bases are siblings over a shared generic base instead of the async one inheriting the sync one. An `async def body()` cannot override a sync `def body()`, which made the `starlette` adapter — registered as async, but inheriting the sync base — a type error.
+- The `httpx2` adapter shares the common base again instead of duplicating it. The base grew a type parameter for the wrapped request in this release, which is what kept the `httpx2` copy separate; `--http2` stays in the output.
+- The release workflow anchors its version replacement on the `version` lines instead of replacing every occurrence of the literal `0.1.0`, which is also a plausible dependency bound now that Dependabot writes into `pyproject.toml`. The step asserts the replaced value afterwards, so a substitution that matched nothing stops the release instead of publishing the placeholder.
+
+### Fixed
+- The `starlette` adapter resolved `starlette.requests.Request` through a bare `import starlette`, which worked only because an unused import of the same module happened to register the submodule. It imports `Request` directly now.
+- A request whose `Content-Type` announces `multipart` while carrying no body no longer raises `TypeError`; it renders without `-F`. Reachable with `requests` when the header is set by hand.
+- A `requests` body that is an iterable or a file-like object (a streaming payload) is no longer rendered as its Python `repr` inside `-d`. Such a payload has no textual form a shell could replay, so the command now carries no `-d` at all.
+- Header values are decoded to text before they are rendered. `requests` types its header values as `str | bytes`, and a `bytes` value used to reach `"multipart" in content_type` and raise `TypeError`.
+
 ## 0.9 (2026-08-17)
 
 ### Added

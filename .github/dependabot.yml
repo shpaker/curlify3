@@ -1,0 +1,40 @@
+---
+version: 2
+updates:
+  # uv understands pyproject.toml together with uv.lock natively
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    # raises the floors in pyproject.toml too, not only the pinned versions in
+    # uv.lock — a floor that stays behind is a version the tests never run on
+    versioning-strategy: "increase"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"
+    cooldown:
+      default-days: 3
+    # grouped by name and not by dependency-type on purpose: the uv ecosystem
+    # has a history of reporting everything in [dependency-groups] as a
+    # production dependency, and patterns work either way
+    groups:
+      dev-tooling:
+        # a new ruff or ty release can fail the lint job on its own, keep it
+        # apart from the test stack so it stays easy to revert
+        patterns: ["ruff", "ty"]
+      test-stack:
+        patterns: ["pytest*", "requests", "httpx*", "aiohttp", "fastapi"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "github-actions"]
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]

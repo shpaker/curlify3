@@ -5,12 +5,14 @@ The PowerShell tests run only on Windows (powershell.exe 5.1, the dialect target
 the sh tests run everywhere else via bash. CI covers both via ubuntu and windows jobs.
 """
 
+import pathlib
 import platform
 import subprocess
 import threading
 
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, TypeAlias
 
 import httpx
 import pytest
@@ -19,13 +21,18 @@ from curlify3 import POWERSHELL, SH, to_curl
 
 SUBPROCESS_TIMEOUT = 120
 
+# the base url of the capture server and the requests it has captured
+CaptureServer: TypeAlias = tuple[str, list[dict[str, Any]]]
+
 
 @pytest.fixture
-def capture_server():
-    captured = []
+def capture_server() -> Iterator[CaptureServer]:
+    captured: list[dict[str, Any]] = []
 
     class CaptureHandler(BaseHTTPRequestHandler):
-        def _capture(self):
+        def _capture(
+            self,
+        ) -> None:
             length = int(self.headers.get("content-length") or 0)
             captured.append(
                 {
@@ -42,7 +49,12 @@ def capture_server():
         do_GET = _capture
         do_POST = _capture
 
-        def log_message(self, *args):
+        # the signature mirrors BaseHTTPRequestHandler.log_message, Any included
+        def log_message(
+            self,
+            format: str,
+            *args: Any,  # noqa: ANN401
+        ) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureHandler)
@@ -93,14 +105,22 @@ _POWERSHELL_ONLY_REQUESTS = [
 
 
 def run_and_assert(
-    base_url, captured, request_kwargs, shell, script_path, runner_args, script_prelude="", **curl_kwargs
-):
+    base_url: str,
+    captured: list[dict[str, Any]],
+    request_kwargs: dict[str, Any],
+    shell: str,
+    script_path: pathlib.Path,
+    runner_args: list[str],
+    script_prelude: str = "",
+    # pretty / long_options, forwarded to to_curl
+    **curl_kwargs: bool,
+) -> None:
     request_kwargs = dict(request_kwargs)
     request_kwargs["url"] = base_url + request_kwargs["url"]
     req = httpx.Request(**request_kwargs)
     script_path.write_text(script_prelude + to_curl(req, shell=shell, **curl_kwargs), encoding="utf-8")
     completed = subprocess.run(
-        runner_args + [str(script_path)],
+        [*runner_args, str(script_path)],
         capture_output=True,
         timeout=SUBPROCESS_TIMEOUT,
     )
@@ -114,7 +134,11 @@ def run_and_assert(
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
 @pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS)
-def test_sh_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> None:
+def test_sh_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    request_kwargs: dict[str, Any],
+) -> None:
     base_url, captured = capture_server
     run_and_assert(base_url, captured, request_kwargs, SH, tmp_path / "cmd.sh", ["bash"])
 
@@ -123,7 +147,11 @@ def test_sh_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> Non
 # and curl must accept the url in the leading position
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
 @pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
-def test_sh_pretty_e2e(capture_server, tmp_path, long_options: bool) -> None:
+def test_sh_pretty_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    long_options: bool,
+) -> None:
     base_url, captured = capture_server
     run_and_assert(
         base_url,
@@ -150,7 +178,11 @@ def test_sh_pretty_e2e(capture_server, tmp_path, long_options: bool) -> None:
 )
 @pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS + _POWERSHELL_ONLY_REQUESTS)
 def test_powershell_e2e(
-    capture_server, tmp_path, ps_binary: str, script_prelude: str, request_kwargs: dict[str, Any]
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    ps_binary: str,
+    script_prelude: str,
+    request_kwargs: dict[str, Any],
 ) -> None:
     base_url, captured = capture_server
     run_and_assert(

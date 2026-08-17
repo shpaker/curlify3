@@ -8,22 +8,31 @@ import fastapi
 import httpx
 import httpx2
 import pytest
-import pytest_aiohttp
 import requests
 
 from aiohttp import web as aiohttp_web
-from aiohttp.test_utils import TestClient
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
 from curlify3._curl import quote_powershell
+
+# imported directly so a broken adapter module fails collection loudly instead
+# of quietly disappearing from the registries under suppress(ImportError)
+from curlify3._req_aiohttp import AiohttpServerRequest
+from curlify3._req_httpx import AsyncHttpxRequest, HttpxRequest
+from curlify3._req_httpx2 import AsyncHttpx2Request, Httpx2Request
+from curlify3._req_requests import RequestsRequest
+from curlify3._req_starlette import StarletteRequest
+from curlify3._utils import _REQUEST_DATA_CLASSES, _REQUEST_DATA_CLASSES_ASYNC
 
 
 @pytest.fixture
 def aiohttp_app() -> aiohttp_web.Application:
     aiohttp_app = aiohttp_web.Application()
 
-    async def hello(request: aiohttp_web.Request) -> aiohttp_web.Response:
+    async def hello(
+        request: aiohttp_web.Request,
+    ) -> aiohttp_web.Response:
         try:
             data = await to_curl_async(request)
         except Exception as exc:
@@ -41,12 +50,16 @@ def fastapi_app() -> fastapi.FastAPI:
     app = fastapi.FastAPI()
 
     @app.get("/get")
-    async def get(request: fastapi.Request) -> fastapi.Response:
+    async def get(
+        request: fastapi.Request,
+    ) -> fastapi.Response:
         data = await to_curl_async(request)
         return fastapi.Response(content=data)
 
     @app.post("/post")
-    async def post(request: fastapi.Request) -> fastapi.Response:
+    async def post(
+        request: fastapi.Request,
+    ) -> fastapi.Response:
         data = await to_curl_async(request)
         return fastapi.Response(content=data)
 
@@ -253,7 +266,9 @@ def test_requests_to_curl(
 ) -> None:
     prepared = req.prepare()
     results = to_curl(prepared)
-    if (content_type := prepared.headers.get("content-type")) and "boundary" in content_type:
+    # requests declares its header values as str | bytes, multipart ones are str
+    content_type = prepared.headers.get("content-type")
+    if isinstance(content_type, str) and "boundary" in content_type:
         boundary = content_type.rsplit("boundary=")[1]
         expected = expected.format(boundary=boundary)
     assert results == expected, results
@@ -426,7 +441,10 @@ _HTTPX2_PARAMS = [
     "req, expected",
     _HTTPX2_PARAMS,
 )
-def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
+def test_httpx2_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
     results = to_curl(req)
     assert results == expected, results
 
@@ -436,7 +454,10 @@ def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
     _HTTPX2_PARAMS,
 )
 @pytest.mark.asyncio
-async def test_httpx2_async_to_curl(req: httpx2.Request, expected: str) -> None:
+async def test_httpx2_async_to_curl(
+    req: httpx2.Request,
+    expected: str,
+) -> None:
     results = await to_curl_async(req)
     assert results == expected, results
 
@@ -565,7 +586,10 @@ async def test_httpx_async_to_curl_powershell(
         pytest.param("a b\\", r'"a b\\"', id="TRAILING BACKSLASH WITH SPACE"),
     ],
 )
-def test_quote_powershell(value: str, expected: str) -> None:
+def test_quote_powershell(
+    value: str,
+    expected: str,
+) -> None:
     assert quote_powershell(value) == expected
 
 
@@ -672,3 +696,35 @@ def test_to_curl_pretty_powershell() -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get")
     with pytest.raises(ValueError, match="pretty output is not supported"):
         to_curl(req, shell=POWERSHELL, pretty=True)
+
+
+def test_request_data_registries() -> None:
+    # _utils registers every adapter under suppress(ImportError), so a broken
+    # adapter module drops out of the registry silently and only shows up as an
+    # unrelated "unknown request object" later. The order is part of the
+    # contract too: the first adapter that accepts the request wins.
+    assert list(_REQUEST_DATA_CLASSES) == [RequestsRequest, Httpx2Request, HttpxRequest]
+    assert list(_REQUEST_DATA_CLASSES_ASYNC) == [
+        AsyncHttpx2Request,
+        AsyncHttpxRequest,
+        AiohttpServerRequest,
+        StarletteRequest,
+    ]
+
+
+def test_requests_streaming_body_is_dropped() -> None:
+    # requests accepts an iterable body, which has no textual form a shell could
+    # run — the command carries the headers but no -d
+    req = requests.Request(method="POST", url="https://httpbin.org/post", data=iter([b"chunk"])).prepare()
+    assert to_curl(req) == "curl -X POST -H 'transfer-encoding: chunked' https://httpbin.org/post"
+
+
+def test_multipart_content_type_without_body() -> None:
+    # a content-type that promises multipart while the request carries no body
+    # renders without -F rather than raising
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": "multipart/form-data; boundary=abc"},
+    ).prepare()
+    assert to_curl(req) == "curl -X POST -H 'content-type: multipart/form-data; boundary=abc' https://httpbin.org/post"

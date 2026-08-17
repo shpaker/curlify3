@@ -13,8 +13,8 @@ Repository = "https://github.com/shpaker/curlify3"
 
 [dependency-groups]
 dev = [
-    "black>=24.8",
-    "isort>=5.13",
+    "ruff>=0.16",
+    "ty>=0.0.72",
     "requests>=2.32",
     "httpx>=0.28",
     "httpx2[http2]>=2.0",
@@ -35,11 +35,43 @@ packages = ["curlify3"]
 [tool.hatch.build.targets.sdist]
 include = ["curlify3", "README.md", "pyproject.toml"]
 
-[tool.isort]
-line_length = 120
-include_trailing_comma = true
-lines_between_types = 1
-
-[tool.black]
+[tool.ruff]
 line-length = 120
-skip-string-normalization = true
+# target-version is inferred from project.requires-python
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "ANN", "RUF"]
+ignore = [
+    # the try/except UnicodeDecodeError/pass + return shape reads better than
+    # contextlib.suppress and is repeated across all five request adapters
+    "SIM105",
+    # dict(...) marks the request kwargs that are splatted into httpx.Request
+    "C408",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# the expected curl commands are compared verbatim, so they cannot be wrapped;
+# the file handles are what httpx takes the multipart filename from, so they
+# cannot become `with` blocks without changing the expected output
+"test_curlify3.py" = ["E501", "SIM115"]
+
+[tool.ruff.lint.isort]
+lines-between-types = 1
+
+[tool.ruff.format]
+# black's skip-string-normalization
+quote-style = "preserve"
+# the README snippets are illustrative, keep them compact
+exclude = ["*.md"]
+# every parameter of a function goes on its own line, so every parameter list
+# ends with a trailing comma. Nothing in ruff can require that of a signature
+# written on one line, but the magic trailing comma keeps the ones that are
+# already written that way from being collapsed back — leave it enabled.
+skip-magic-trailing-comma = false
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.terminal]
+error-on-warning = true
+output-format = "concise"
