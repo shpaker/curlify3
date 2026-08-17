@@ -957,13 +957,71 @@ def test_to_curl_multipart_single_character_field_name() -> None:
 
 
 @pytest.mark.parametrize(
+    "value, expected",
+    [
+        # the value used to be matched as a single line, so it was cut at the first CRLF and
+        # the command sent the prefix without a word
+        pytest.param("line1\r\nline2", "-F 'note=line1\r\nline2'", id="CRLF"),
+        pytest.param("a\nb", "-F 'note=a\nb'", id="LF"),
+        # a newline does not stop the value from being a file reference too
+        pytest.param("@x\r\ny", "--form-string 'note=@x\r\ny'", id="FILE REF WITH CRLF"),
+    ],
+)
+def test_to_curl_multipart_field_newline_value(
+    value: str,
+    expected: str,
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"note": (None, value)})
+    assert f" {expected} " in to_curl(req)
+
+
+def test_to_curl_multipart_preserves_wire_order() -> None:
+    # the parts are rendered in the order the body carries them. The two patterns this replaced
+    # ran one after the other, so every plain field came out before every file part whatever
+    # order the body put them in
+    req = httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        files={"img": ("i.png", b"x"), "foo": (None, "bar")},
+    )
+    assert " -F 'img=@i.png' -F 'foo=bar' " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "content_type, expected",
+    [
+        pytest.param("multipart/form-data; boundary=b", " -F 'foo=bar' ", id="BARE"),
+        pytest.param('multipart/form-data; boundary="b"', " -F 'foo=bar' ", id="QUOTED"),
+        # nothing to take the body apart with, so there are no parts to render — the command a
+        # multipart content-type without a body produces
+        pytest.param("multipart/form-data", None, id="MISSING"),
+    ],
+)
+def test_to_curl_multipart_boundary(
+    content_type: str,
+    expected: str | None,
+) -> None:
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": content_type},
+        data=b'--b\r\nContent-Disposition: form-data; name="foo"\r\n\r\nbar\r\n--b--\r\n',
+    ).prepare()
+    command = to_curl(req)
+    if expected is None:
+        assert "-F" not in command
+    else:
+        assert expected in command
+
+
+@pytest.mark.parametrize(
     "part, expected",
     [
         pytest.param(b'name="f"\r\n\r\nplain', "-F 'f=plain'", id="TEXT FIELD"),
         # a part name or filename in an encoding of its own is spelled as bytes: the shell hands
         # curl the same bytes back, so the field keeps its name and the file its path
         pytest.param(b'name="\xe9"\r\n\r\nv', "-F $'\\xe9=v'", id="FIELD NAME NOT UTF-8"),
-        pytest.param(b'name="f"; filename="caf\xe9.bin"', "-F $'f=@caf\\xe9.bin'", id="FILENAME NOT UTF-8"),
+        pytest.param(b'name="f"; filename="caf\xe9.bin"\r\n\r\nx', "-F $'f=@caf\\xe9.bin'", id="FILENAME NOT UTF-8"),
     ],
 )
 def test_to_curl_multipart_part_not_utf8(

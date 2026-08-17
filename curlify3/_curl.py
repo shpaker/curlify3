@@ -1,6 +1,6 @@
 import re
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Final, NamedTuple, TypeAlias
 
 from curlify3._types import Body, Headers
@@ -12,8 +12,9 @@ Quote: TypeAlias = Callable[[str], str]
 BytesQuote: TypeAlias = Callable[[bytes], str]
 Options: TypeAlias = Mapping[str, str]
 
-MULTIPART_FORM_DATA: Final = re.compile(rb'form-data; name="([^"]+)"\r\n\r\n(.+)\r\n')
-MULTIPART_FILE_DATA: Final = re.compile(rb'form-data; name="([^"]+)"; filename="([^"]+)"')
+MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?')
+PART_NAME: Final = re.compile(rb'name="([^"]*)"')
+PART_FILENAME: Final = re.compile(rb'filename="([^"]*)"')
 
 # curl reads a leading @ in a --data value, and a leading @ or < in a --form value, as
 # "load the value from this file" rather than as the value itself. Such a value has to go
@@ -194,25 +195,51 @@ def quote_multipart_part(
         return quote_bytes(part)
 
 
+def split_multipart_body(
+    body: bytes,
+    boundary: bytes,
+) -> Iterator[tuple[bytes, bytes]]:
+    # a part is --boundary CRLF headers CRLF CRLF value CRLF, and the body is closed by
+    # --boundary--, whose chunk carries no CRLF CRLF and so drops out below. Splitting on the
+    # delimiter the sender chose is what lets a value hold a CRLF of its own: matching a
+    # value as one line truncated it there, and the command sent the prefix without a word
+    for chunk in body.split(b"--" + boundary)[1:]:
+        head, separator, value = chunk.partition(b"\r\n\r\n")
+        if separator:
+            yield head, value.removesuffix(b"\r\n")
+
+
 def make_multipart_curl_args(
     body: str | bytes,
+    content_type: str,
     quote: Quote,
     quote_bytes: BytesQuote,
     options: Options,
 ) -> list[str]:
-    body_parts = []
+    boundary = MULTIPART_BOUNDARY.search(content_type)
+    # without the boundary parameter the body cannot be taken apart, and a body that cannot be
+    # taken apart has no parts to render — the same command a multipart content-type without a
+    # body produces
+    if boundary is None:
+        return []
     body = body.encode() if isinstance(body, str) else body
-    for matched in MULTIPART_FORM_DATA.finditer(body):
-        name, value = matched.groups()
-        # the value of a plain field is a literal, so --form-string as soon as it begins with a
-        # character -F would read as a file reference. -F stays the common case: it is the
-        # terser option and the value rarely begins with either character
-        option = options["form_string"] if value.startswith(FORM_FILE_REF) else options["form"]
-        body_parts.append(f"{option} {quote_multipart_part(name + b'=' + value, quote, quote_bytes)}")
-    for matched in MULTIPART_FILE_DATA.finditer(body):
-        name, filename = matched.groups()
-        # here the leading @ is the point: -F is what makes curl send the file the request sent
-        body_parts.append(f"{options['form']} {quote_multipart_part(name + b'=@' + filename, quote, quote_bytes)}")
+    body_parts = []
+    for head, value in split_multipart_body(body, boundary.group(1).encode()):
+        name = PART_NAME.search(head)
+        if name is None:
+            continue
+        filename = PART_FILENAME.search(head)
+        if filename is not None:
+            # here the leading @ is the point: -F is what makes curl send the file the
+            # request sent, so a file part is spelled name=@filename
+            part, option = name.group(1) + b"=@" + filename.group(1), options["form"]
+        else:
+            # the value of a plain field is a literal, so --form-string as soon as it begins
+            # with a character -F would read as a file reference. -F stays the common case: it
+            # is the terser option and the value rarely begins with either character
+            part = name.group(1) + b"=" + value
+            option = options["form_string"] if value.startswith(FORM_FILE_REF) else options["form"]
+        body_parts.append(f"{option} {quote_multipart_part(part, quote, quote_bytes)}")
     return body_parts
 
 
@@ -227,10 +254,11 @@ def make_curl_body(
     if not body:
         return []
     # multipart comes first: such a body arrives as bytes whenever one of its file parts
-    # is binary, and the parts are matched and rendered individually below — each with its
-    # own NUL check, since only part of such a body reaches the command line
-    if "multipart" in headers.get("content-type", ""):
-        return make_multipart_curl_args(body, quote, quote_bytes, options)
+    # is binary, and the parts are taken apart and rendered individually below — each with
+    # its own NUL check, since only part of such a body reaches the command line
+    content_type = headers.get("content-type", "")
+    if "multipart" in content_type:
+        return make_multipart_curl_args(body, content_type, quote, quote_bytes, options)
     reject_nul(body, "body")
     if isinstance(body, bytes):
         # the adapter could not decode it. --data-raw rather than --data, because both --data

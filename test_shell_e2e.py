@@ -243,6 +243,33 @@ def test_sh_multipart_field_file_reference_e2e(
     assert b"SECRET-FILE-CONTENT" not in body, body
 
 
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+@pytest.mark.parametrize("pretty", [False, True], ids=["one line", "pretty"])
+def test_sh_multipart_field_newline_value_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    pretty: bool,
+) -> None:
+    # a field value holding a CRLF of its own puts a literal newline in the command, which a
+    # single-quoted word carries — pretty is the case worth running, since its continuations
+    # have to keep working around one
+    base_url, captured = capture_server
+    value = "line1\r\nline2"
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"note": (None, value)})
+    script_path = tmp_path / "cmd.sh"
+    script_path.write_text(to_curl(req, shell=SH, pretty=pretty), encoding="utf-8")
+    completed = subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+    debug = (completed.returncode, completed.stdout, completed.stderr)
+    assert completed.returncode == 0, debug
+    assert len(captured) == 1, (captured, debug)
+    # curl picks its own boundary, so what matters is that the value arrived whole
+    assert value.encode() in captured[0]["body"], captured[0]["body"]
+
+
 @pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets PowerShell on Windows")
 @pytest.mark.parametrize(
     "ps_binary, script_prelude",
