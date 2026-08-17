@@ -92,11 +92,11 @@ _POWERSHELL_ONLY_REQUESTS = [
 ]
 
 
-def run_and_assert(base_url, captured, request_kwargs, shell, script_path, runner_args):
+def run_and_assert(base_url, captured, request_kwargs, shell, script_path, runner_args, script_prelude=""):
     request_kwargs = dict(request_kwargs)
     request_kwargs["url"] = base_url + request_kwargs["url"]
     req = httpx.Request(**request_kwargs)
-    script_path.write_text(to_curl(req, shell=shell), encoding="utf-8")
+    script_path.write_text(script_prelude + to_curl(req, shell=shell), encoding="utf-8")
     completed = subprocess.run(
         runner_args + [str(script_path)],
         capture_output=True,
@@ -118,11 +118,20 @@ def test_sh_e2e(capture_server, tmp_path, request_kwargs: dict[str, Any]) -> Non
 
 
 @pytest.mark.skipif(platform.system() != "Windows", reason="powershell dialect targets PowerShell on Windows")
-@pytest.mark.parametrize("ps_binary", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize(
+    "ps_binary, script_prelude",
+    [
+        # Windows PowerShell 5.1, the dialect's target: the command runs as generated
+        pytest.param("powershell.exe", "", id="powershell.exe"),
+        # pwsh 7.2+ routes even stop-parsing-token arguments through its new argument binder;
+        # this verifies the remedy documented in the README — switch the session to legacy passing
+        pytest.param("pwsh", "$PSNativeCommandArgumentPassing = 'Legacy'\n", id="pwsh-legacy"),
+    ],
+)
 @pytest.mark.parametrize("request_kwargs", _E2E_REQUESTS + _POWERSHELL_ONLY_REQUESTS)
-def test_powershell_e2e(capture_server, tmp_path, ps_binary: str, request_kwargs: dict[str, Any]) -> None:
-    # both Windows PowerShell 5.1 and pwsh 7.3+, whose native argument passing differs —
-    # the --% stop-parsing token makes the generated command behave identically in both
+def test_powershell_e2e(
+    capture_server, tmp_path, ps_binary: str, script_prelude: str, request_kwargs: dict[str, Any]
+) -> None:
     base_url, captured = capture_server
     run_and_assert(
         base_url,
@@ -131,4 +140,5 @@ def test_powershell_e2e(capture_server, tmp_path, ps_binary: str, request_kwargs
         POWERSHELL,
         tmp_path / "cmd.ps1",
         [ps_binary, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"],
+        script_prelude=script_prelude,
     )

@@ -46,10 +46,13 @@ class ShellConfig(NamedTuple):
 
 SHELLS = {
     SH: ShellConfig("curl", "", quote_sh, quote_sh_url, quote_sh_cookies),
-    # --% is the PowerShell stop-parsing token: everything after it reaches curl.exe verbatim
-    # (only %VAR% references expand), so the command works identically in Windows PowerShell 5.1
-    # and pwsh 6/7 regardless of their different native argument passing; the url and cookies
-    # are still always quoted to keep whitespace safe for the C runtime parser
+    # --% is the stop-parsing token: Windows PowerShell 5.1 (the dialect's target) hands
+    # everything after it to curl.exe verbatim (only %VAR% references expand), leaving the
+    # C runtime as the single parser — 5.1's own argument binder re-quotes by counting every
+    # double quote, escaped or not, and corrupts JSON payloads no matter how they are written;
+    # pwsh 7.2+ binds even these arguments the new way and needs
+    # $PSNativeCommandArgumentPassing = 'Legacy' in the session first (documented in README);
+    # the url and cookies are always quoted to keep whitespace safe for the C runtime parser
     POWERSHELL: ShellConfig("curl.exe", "--%", quote_powershell, quote_powershell, quote_powershell),
 }
 

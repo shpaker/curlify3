@@ -126,7 +126,7 @@ print(to_curl(req, shell="powershell"))
 # curl.exe --% -X POST -H "content-type: application/json" -d "{\"date\": \"2026-08-10\"}" "https://httpbin.org/post"
 ```
 
-Nothing after `--%` is parsed by PowerShell itself, so the same command works in Windows PowerShell 5.1 (the `powershell.exe` preinstalled on every Windows) and in `pwsh` 6/7 — including 7.3+, which changed how arguments are passed to native executables — and `$`, backticks, and semicolons in values need no extra care. The one thing PowerShell still expands after the token is `%NAME%` environment-variable references, so a payload containing such a pattern would be substituted. The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+The dialect targets Windows PowerShell 5.1 — the `powershell.exe` preinstalled on every Windows. Nothing after `--%` is parsed by it, so `$`, backticks, semicolons, and quotes in values need no extra care; the one thing still expanded is `%NAME%` environment-variable references. (Without the token, 5.1's argument binder re-quotes values by counting every double quote — escaped or not — and corrupts JSON payloads no matter how they are escaped.) Modern `pwsh` 7.2+ routes even stop-parsing-token arguments through its new argument binder; to paste the command there, first switch the session back with `$PSNativeCommandArgumentPassing = 'Legacy'`. The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
 
 ### `aiohttp` — server-side
 
@@ -166,7 +166,7 @@ Render a request object as a `curl` command. Use for synchronous request types (
 
 Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1 and `pwsh` 6/7).
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section).
 
 Both functions raise `ValueError` if the request type or the `shell` value is not recognized.
 
