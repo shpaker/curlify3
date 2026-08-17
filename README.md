@@ -15,6 +15,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - Works with **client-side** requests (`requests`, `httpx`, `httpx2`) and **server-side** incoming requests (`aiohttp.web`, `starlette` / `fastapi`)
 - Faithful rendering of headers, query parameters, cookies (`-b`), and bodies
 - Body payloads: text, JSON, form-encoded, multipart, binary
+- POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - Zero runtime dependencies
 
 ## Installation
@@ -107,6 +108,31 @@ print(to_curl(req))
 
 `to_curl_async()` works with `httpx2.Request` too.
 
+### Windows PowerShell
+
+By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get one that pastes into Windows PowerShell 5.1.
+
+```python
+import requests
+from curlify3 import to_curl
+
+req = requests.Request(
+    "POST",
+    "https://httpbin.org/post",
+    json={"date": "2026-08-10"},
+).prepare()
+
+print(to_curl(req, shell="powershell"))
+# curl.exe --% -X POST -H "content-type: application/json" -d "{\"date\": \"2026-08-10\"}" "https://httpbin.org/post"
+```
+
+`curl.exe` avoids the `Invoke-WebRequest` alias, and `--%` — PowerShell's stop-parsing token — hands the rest to `curl.exe` verbatim. The token is what makes arbitrary JSON survive: without it, 5.1's argument binder re-quotes values by counting every double quote, escaped or not, and mangles the body. Two consequences worth knowing:
+
+- `%NAME%` environment-variable references in a payload are still expanded.
+- The command is for PowerShell only — in `cmd`, git-bash, or WSL, `curl.exe` chokes on `--%`; use the default `shell="sh"` output there. On `pwsh` 7.2+, run `$PSNativeCommandArgumentPassing = 'Legacy'` in the session first.
+
+The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+
 ### `aiohttp` — server-side
 
 Render an incoming request inside a handler. The async variant is required because the body is read from the stream.
@@ -137,15 +163,17 @@ async def echo(request: Request):
 
 ## API
 
-### `to_curl(request) -> str`
+### `to_curl(request, shell="sh") -> str`
 
 Render a request object as a `curl` command. Use for synchronous request types (`requests.PreparedRequest`, `httpx.Request`, `httpx2.Request`).
 
-### `to_curl_async(request) -> str`
+### `to_curl_async(request, shell="sh") -> str`
 
 Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-Both functions raise `ValueError("unknown request object")` if the request type is not recognized.
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section).
+
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized.
 
 ## Supported request objects
 

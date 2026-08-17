@@ -4,6 +4,7 @@ name: Tests
 on:
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -28,3 +29,24 @@ jobs:
           python-version: ${{ matrix.PYTHON_VERSION }}
       - run: uv sync --group dev
       - run: just tests
+
+  tests-windows:
+    # verifies the powershell dialect end-to-end with the real powershell.exe 5.1 (test_shell_e2e.py);
+    # oldest and newest supported pythons are enough — the dialect does not depend on the python version
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        PYTHON_VERSION:
+          - "3.10"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.PYTHON_VERSION }}
+      - run: uv sync --group dev
+      - run: uv run pytest -vv

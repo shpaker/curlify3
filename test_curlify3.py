@@ -15,7 +15,8 @@ from aiohttp import web as aiohttp_web
 from aiohttp.test_utils import TestClient
 from pytest_aiohttp.plugin import AiohttpClient
 
-from curlify3 import to_curl, to_curl_async
+from curlify3 import POWERSHELL, to_curl, to_curl_async
+from curlify3._curl import quote_powershell
 
 
 @pytest.fixture
@@ -361,10 +362,10 @@ async def test_aiohttp_async_to_curl(
     results = await response.text()
     assert response.status == 200, response.status
     accept_encoding = response.request_info.headers.get('Accept-Encoding', 'gzip, deflate')
-    user_agent = response.request_info.headers.get('User-Agent', f'Python/3.{sys.version_info.minor} aiohttp/{aiohttp.__version__}')
-    additional_headers = (
-        f"-H 'accept: */*' -H 'accept-encoding: {accept_encoding}' -H 'user-agent: {user_agent}'"
+    user_agent = response.request_info.headers.get(
+        'User-Agent', f'Python/3.{sys.version_info.minor} aiohttp/{aiohttp.__version__}'
     )
+    additional_headers = f"-H 'accept: */*' -H 'accept-encoding: {accept_encoding}' -H 'user-agent: {user_agent}'"
     args = dict(
         server=f'{client.host}:{client.port}',
         additional_headers=additional_headers,
@@ -438,3 +439,144 @@ def test_httpx2_to_curl(req: httpx2.Request, expected: str) -> None:
 async def test_httpx2_async_to_curl(req: httpx2.Request, expected: str) -> None:
     results = await to_curl_async(req)
     assert results == expected, results
+
+
+_POWERSHELL_PARAMS = [
+    pytest.param(
+        httpx.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+        ),
+        'curl.exe --% -H "host: httpbin.org" "https://httpbin.org/get"',
+        id="HEADER",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            params={"foo": 911, "bar": "baz"},
+        ),
+        'curl.exe --% -H "host: httpbin.org" "https://httpbin.org/get?foo=911&bar=baz"',
+        id="PARAMS",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        'curl.exe --% -b "bar=baz" -H "host: httpbin.org" "https://httpbin.org/get"',
+        id="COOKIE",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"date": "2026-08-10", "actionReference": "SEND_TOTAL_FLOW_TO_COUNTERPART"},
+        ),
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/json" '
+        r'-d "{\"date\":\"2026-08-10\",\"actionReference\":\"SEND_TOTAL_FLOW_TO_COUNTERPART\"}" '
+        '"https://httpbin.org/post"',
+        id="JSON",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"msg": 'say "hi" now'},
+        ),
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/json" '
+        r'-d "{\"msg\":\"say \\\"hi\\\" now\"}" '
+        '"https://httpbin.org/post"',
+        id="ESCAPED QUOTES",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            content="it's",
+        ),
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: plain/text" -d "it\'s" "https://httpbin.org/post"',
+        id="SINGLE QUOTE",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            data={"bar": "baz", "abc": "123"},
+        ),
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: application/x-www-form-urlencoded" '
+        '-d "bar=baz&abc=123" "https://httpbin.org/post"',
+        id="FORM",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
+            data={"foo": "bar"},
+        ),
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: multipart/form-data; boundary={boundary}" '
+        '-F "foo=bar" -F "image=@image.png" "https://httpbin.org/post"',
+        id="FILE + FORM",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _POWERSHELL_PARAMS,
+)
+def test_httpx_to_curl_powershell(
+    req: httpx.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req, shell=POWERSHELL)
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _POWERSHELL_PARAMS,
+)
+@pytest.mark.asyncio
+async def test_httpx_async_to_curl_powershell(
+    req: httpx.Request,
+    expected: str,
+) -> None:
+    results = await to_curl_async(req, shell=POWERSHELL)
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param('{"bar":"baz"}', r'"{\"bar\":\"baz\"}"', id="QUOTES"),
+        pytest.param('{"name": "O\'Brien"}', '"{\\"name\\": \\"O\'Brien\\"}"', id="SINGLE QUOTE"),
+        pytest.param(r'{"path": "C:\\x"}', r'"{\"path\": \"C:\\x\"}"', id="BACKSLASHES"),
+        pytest.param(r'x\"y', r'"x\\\"y"', id="BACKSLASH BEFORE QUOTE"),
+        pytest.param("ab\\", r'"ab\\"', id="TRAILING BACKSLASH"),
+        pytest.param("a b\\", r'"a b\\"', id="TRAILING BACKSLASH WITH SPACE"),
+    ],
+)
+def test_quote_powershell(value: str, expected: str) -> None:
+    assert quote_powershell(value) == expected
+
+
+def test_to_curl_unknown_shell() -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get")
+    with pytest.raises(ValueError, match="unknown shell"):
+        to_curl(req, shell="fish")
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_unknown_shell() -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get")
+    with pytest.raises(ValueError, match="unknown shell"):
+        await to_curl_async(req, shell="fish")

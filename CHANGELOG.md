@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8 (2026-08-17)
+
+### Added
+- PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `shell="powershell"` on `to_curl()` / `to_curl_async()` renders `curl.exe --% …` for Windows PowerShell 5.1, quoted by Windows command-line rules so arbitrary JSON survives. Without the stop-parsing token, 5.1's argument binder mangles the body however it is escaped; on `pwsh` 7.2+ run `$PSNativeCommandArgumentPassing = 'Legacy'` first, and note that `%NAME%` references in a payload are expanded. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported; default `shell="sh"` output is unchanged.
+- End-to-end shell tests (`test_shell_e2e.py`): the generated command is run by a real shell — bash, plus `powershell.exe` and `pwsh` on a new `windows-latest` CI job — against a local server that checks the request arrives byte-for-byte.
+
 ## 0.7 (2026-06-05)
 
 ### Changed
