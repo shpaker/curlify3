@@ -110,7 +110,7 @@ print(to_curl(req))
 
 ### Windows PowerShell
 
-By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get a command that pastes cleanly into PowerShell on Windows: the binary becomes `curl.exe` (plain `curl` is an alias for `Invoke-WebRequest` there), and the arguments are placed behind PowerShell's stop-parsing token `--%`, quoted for the Windows command line — embedded double quotes become `\"` (with backslash runs in front of them doubled) so JSON payloads reach `curl.exe` byte-for-byte.
+By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get one that pastes into Windows PowerShell 5.1.
 
 ```python
 import requests
@@ -126,7 +126,12 @@ print(to_curl(req, shell="powershell"))
 # curl.exe --% -X POST -H "content-type: application/json" -d "{\"date\": \"2026-08-10\"}" "https://httpbin.org/post"
 ```
 
-The dialect targets Windows PowerShell 5.1 — the `powershell.exe` preinstalled on every Windows. Nothing after `--%` is parsed by it, so `$`, backticks, semicolons, and quotes in values need no extra care; the one thing still expanded is `%NAME%` environment-variable references. (Without the token, 5.1's argument binder re-quotes values by counting every double quote — escaped or not — and corrupts JSON payloads no matter how they are escaped.) Modern `pwsh` 7.2+ routes even stop-parsing-token arguments through its new argument binder; to paste the command there, first switch the session back with `$PSNativeCommandArgumentPassing = 'Legacy'`. The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+`curl.exe` avoids the `Invoke-WebRequest` alias, and `--%` — PowerShell's stop-parsing token — hands the rest to `curl.exe` verbatim. The token is what makes arbitrary JSON survive: without it, 5.1's argument binder re-quotes values by counting every double quote, escaped or not, and mangles the body. Two consequences worth knowing:
+
+- `%NAME%` environment-variable references in a payload are still expanded.
+- The command is for PowerShell only — in `cmd`, git-bash, or WSL, `curl.exe` chokes on `--%`; use the default `shell="sh"` output there. On `pwsh` 7.2+, run `$PSNativeCommandArgumentPassing = 'Legacy'` in the session first.
+
+The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
 
 ### `aiohttp` — server-side
 

@@ -3,8 +3,8 @@
 ## 0.8 (2026-08-17)
 
 ### Added
-- PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `to_curl(request, shell="powershell")` and `to_curl_async(request, shell="powershell")` render the command as `curl.exe --% …` for Windows PowerShell 5.1 — the stop-parsing token hands everything to `curl.exe` verbatim, so one quoting scheme (Windows command-line rules: `"` becomes `\"`, backslash runs before a quote and trailing runs double, URL and cookies always quoted) covers arbitrary payloads; without it, 5.1's argument binder corrupts JSON bodies no matter how they are escaped. On `pwsh` 7.2+ run `$PSNativeCommandArgumentPassing = 'Legacy'` first. Known limitation: `%NAME%` environment-variable references in the payload are expanded by the token. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported. Default (`shell="sh"`) output is unchanged.
-- End-to-end shell tests (`test_shell_e2e.py`): the generated command is executed by a real shell — bash on POSIX, `powershell.exe` 5.1 as-is and `pwsh` with the documented `Legacy` remedy on Windows — against a local HTTP server that checks the request arrives byte-for-byte. CI gained a `windows-latest` job and a manual `workflow_dispatch` trigger.
+- PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `shell="powershell"` on `to_curl()` / `to_curl_async()` renders `curl.exe --% …` for Windows PowerShell 5.1, quoted by Windows command-line rules so arbitrary JSON survives. Without the stop-parsing token, 5.1's argument binder mangles the body however it is escaped; on `pwsh` 7.2+ run `$PSNativeCommandArgumentPassing = 'Legacy'` first, and note that `%NAME%` references in a payload are expanded. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported; default `shell="sh"` output is unchanged.
+- End-to-end shell tests (`test_shell_e2e.py`): the generated command is run by a real shell — bash, plus `powershell.exe` and `pwsh` on a new `windows-latest` CI job — against a local server that checks the request arrives byte-for-byte.
 
 ## 0.7 (2026-06-05)
 
