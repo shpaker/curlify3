@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A body or a multipart field value that starts with `@` — or `<` for a field value — no longer makes the rendered command read a **local file** and send it to the url the request was rendered for. `curl` reads those leading characters as the name of a file to load the value from, so `-d '@/etc/passwd'` sent the file rather than the body. Such a value is now rendered with the option that takes it literally, `--data-raw` or `--form-string`; a file *part* keeps `-F 'field=@file'`, where the `@` is the intended meaning. Reachable from the wire through the server-side adapters, where the value is the caller's to choose, and verified end-to-end against a real file.
+- A multipart field carrying a value that is not valid UTF-8 no longer raises `UnicodeDecodeError`. Part names, field values and filenames are rendered through the same ANSI-C quoting a body that did not decode uses (`-F $'blob=caf\xe9'`), and `shell="powershell"` refuses them the way it already refuses a raw body.
+- A single-character multipart field name was dropped from the command without a word: both part patterns required two characters of a name, so `-F 'a=1'` never appeared and the command silently sent less than the request did.
+- A NUL byte in a multipart field value is rejected like one in a body. The multipart branch was exempt from the check on the grounds that it renders only names and filenames, which was not true of a plain field's value — the argument would have been truncated at the NUL and the command would have run, sending something other than the request.
+
 ## 0.11 (2026-08-17)
 
 ### Fixed

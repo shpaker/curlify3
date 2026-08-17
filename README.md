@@ -212,7 +212,7 @@ Async variant. Use for server-side request objects whose body must be `await`-ed
 
 `shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options.
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if the body contains a NUL byte.
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte.
 
 ## Supported request objects
 
@@ -233,6 +233,7 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Form-encoded | `-d 'k=v&k2=v2'` with `content-type: application/x-www-form-urlencoded` |
 | Multipart / files | `-F 'field=@file' -F 'other=value'` |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
+| File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
 | Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it) |
 | Headers | `-H 'name: value'` (lowercased) |
 
@@ -243,7 +244,17 @@ A body that does not decode as UTF-8 is rendered as an ANSI-C quoted literal, wi
 - `$'…'` is understood by `bash`, `zsh` and `ksh`, but it is **not** POSIX: `dash` and BusyBox `ash` pass `$\xff\xfe` through literally. The dialect is named `sh`, but a binary body needs one of the former.
 - `--data-raw`, not `-d`: both `-d` and `--data-binary` read a leading `@` as a filename to load the body from, and `@` is an ordinary byte in a binary payload.
 
-A body containing a NUL byte raises `ValueError`. A command-line argument is NUL-terminated, so no quoting can carry one — a command that ran and silently sent a truncated body would be worse than one that refuses to be rendered.
+A body containing a NUL byte raises `ValueError`. A command-line argument is NUL-terminated, so no quoting can carry one — a command that ran and silently sent a truncated body would be worse than one that refuses to be rendered. The same applies to a multipart field value, which reaches the command line the same way.
+
+`curl` reads a leading `@` in a `--data` value, and a leading `@` or `<` in a `--form` value, as *the name of a local file to send the contents of* rather than as the value itself. A request whose body or form field genuinely starts with one of those characters is therefore rendered with the option that takes the value literally — `--data-raw` and `--form-string` — so the command sends what the request carried:
+
+```python
+print(to_curl(httpx.Request("POST", "https://example.com/", content="@/etc/passwd")))
+# curl -X POST -H 'host: example.com' -H 'content-type: text/plain' \
+#      --data-raw '@/etc/passwd' https://example.com/
+```
+
+This matters most on the server side, where the value is chosen by whoever sent the request: with `-d`, a command rendered into a log and later pasted into a terminal would read a local file of the caller's choosing and send it to the caller's own url. File *parts* keep `-F 'field=@file'`, where the `@` is the intended meaning.
 
 ## Development
 
