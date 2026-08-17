@@ -3,6 +3,9 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,8 +19,14 @@ jobs:
         id: extract_name_and_version
         shell: bash
         run: echo "ver=${GITHUB_REF#refs/*/}" >> "$GITHUB_OUTPUT"
-      - run: sed -i 's/0.1.0/'"${{ steps.extract_name_and_version.outputs.ver }}"'/' pyproject.toml
-      - run: head -n 10 pyproject.toml
-      - run: sed -i 's/0.1.0/'"${{ steps.extract_name_and_version.outputs.ver }}"'/' curlify3/__init__.py
+      # anchored on the version lines: 0.1.0 is also a plausible dependency
+      # bound, and dependabot writes those into pyproject.toml
+      - name: Set version
+        env:
+          VER: ${{ steps.extract_name_and_version.outputs.ver }}
+        run: |
+          sed -i 's/^version = "0.1.0"$/version = "'"$VER"'"/' pyproject.toml
+          sed -i 's/^__version__ = "0.1.0"$/__version__ = "'"$VER"'"/' curlify3/__init__.py
+          grep -E '^(version|__version__) = ' pyproject.toml curlify3/__init__.py
       - run: uv build
       - run: uv publish --token "${{ secrets.PYPI_PASS }}"
