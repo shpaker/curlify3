@@ -865,3 +865,176 @@ def test_multipart_content_type_without_body() -> None:
         headers={"content-type": "multipart/form-data; boundary=abc"},
     ).prepare()
     assert to_curl(req) == "curl -X POST -H 'content-type: multipart/form-data; boundary=abc' https://httpbin.org/post"
+
+
+# a leading @ in a --data value, and a leading @ or < in a --form value, name a local file for
+# curl to send the contents of. Both are reachable from the wire through the server-side
+# adapters, where a command rendered into a log would read a file of the caller's choosing
+
+
+@pytest.mark.parametrize(
+    "content, expected_option",
+    [
+        # the option has to change: --data would send the contents of /etc/passwd instead
+        pytest.param("@/etc/passwd", "--data-raw", id="LEADING AT"),
+        # only the first character carries the meaning, so the terse option stays elsewhere
+        pytest.param("user@example.com", "-d", id="AT INSIDE"),
+        pytest.param("<html>", "-d", id="LEADING LT IS DATA SAFE"),
+    ],
+)
+def test_to_curl_body_file_reference(
+    content: str,
+    expected_option: str,
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content=content)
+    assert f" {expected_option} '{content}'" in to_curl(req)
+
+
+@pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
+def test_to_curl_body_file_reference_option_name(
+    long_options: bool,
+) -> None:
+    # --data-raw has no short form, so the option name is the same either way
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content="@x")
+    assert " --data-raw '@x'" in to_curl(req, long_options=long_options)
+
+
+def test_to_curl_body_file_reference_powershell() -> None:
+    # the dialect renders the same option: --% leaves the value to curl.exe, which reads
+    # the leading @ exactly as it does under sh
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", content="@x")
+    assert ' --data-raw "@x"' in to_curl(req, shell=POWERSHELL)
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # -F would open the named file and send its contents as the field value
+        pytest.param(b"@/etc/passwd", "--form-string 'field=@/etc/passwd'", id="LEADING AT"),
+        # < is the other spelling of the same thing, and it is a --form value only
+        pytest.param(b"</etc/passwd", "--form-string 'field=</etc/passwd'", id="LEADING LT"),
+        pytest.param(b"user@example.com", "-F 'field=user@example.com'", id="AT INSIDE"),
+    ],
+)
+def test_to_curl_multipart_field_file_reference(
+    value: bytes,
+    expected: str,
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"field": (None, value)})
+    assert f" {expected} " in to_curl(req)
+
+
+def test_to_curl_multipart_field_bytes_value() -> None:
+    # a plain field carrying bytes that are not text: rendered through the same $'...' quoting
+    # a body that did not decode uses, rather than raising UnicodeDecodeError
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"blob": (None, b"caf\xe9")})
+    assert " -F $'blob=caf\\xe9' " in to_curl(req)
+
+
+def test_to_curl_multipart_field_bytes_value_powershell() -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"blob": (None, b"\xff\xfe")})
+    with pytest.raises(ValueError, match="not valid utf-8"):
+        to_curl(req, shell=POWERSHELL)
+
+
+def test_to_curl_multipart_field_nul_value() -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"blob": (None, b"a\x00b")})
+    with pytest.raises(ValueError, match="NUL byte"):
+        to_curl(req)
+
+
+def test_to_curl_multipart_single_character_field_name() -> None:
+    # the part patterns used to require two characters of a name, which dropped a
+    # single-character field from the command without a word
+    req = httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        files={"a": (None, "1"), "long": (None, "2")},
+    )
+    command = to_curl(req)
+    assert " -F 'a=1' " in command
+    assert " -F 'long=2' " in command
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # the value used to be matched as a single line, so it was cut at the first CRLF and
+        # the command sent the prefix without a word
+        pytest.param("line1\r\nline2", "-F 'note=line1\r\nline2'", id="CRLF"),
+        pytest.param("a\nb", "-F 'note=a\nb'", id="LF"),
+        # a newline does not stop the value from being a file reference too
+        pytest.param("@x\r\ny", "--form-string 'note=@x\r\ny'", id="FILE REF WITH CRLF"),
+    ],
+)
+def test_to_curl_multipart_field_newline_value(
+    value: str,
+    expected: str,
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"note": (None, value)})
+    assert f" {expected} " in to_curl(req)
+
+
+def test_to_curl_multipart_preserves_wire_order() -> None:
+    # the parts are rendered in the order the body carries them. The two patterns this replaced
+    # ran one after the other, so every plain field came out before every file part whatever
+    # order the body put them in
+    req = httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        files={"img": ("i.png", b"x"), "foo": (None, "bar")},
+    )
+    assert " -F 'img=@i.png' -F 'foo=bar' " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "content_type, expected",
+    [
+        pytest.param("multipart/form-data; boundary=b", " -F 'foo=bar' ", id="BARE"),
+        pytest.param('multipart/form-data; boundary="b"', " -F 'foo=bar' ", id="QUOTED"),
+        # nothing to take the body apart with, so there are no parts to render — the command a
+        # multipart content-type without a body produces
+        pytest.param("multipart/form-data", None, id="MISSING"),
+    ],
+)
+def test_to_curl_multipart_boundary(
+    content_type: str,
+    expected: str | None,
+) -> None:
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": content_type},
+        data=b'--b\r\nContent-Disposition: form-data; name="foo"\r\n\r\nbar\r\n--b--\r\n',
+    ).prepare()
+    command = to_curl(req)
+    if expected is None:
+        assert "-F" not in command
+    else:
+        assert expected in command
+
+
+@pytest.mark.parametrize(
+    "part, expected",
+    [
+        pytest.param(b'name="f"\r\n\r\nplain', "-F 'f=plain'", id="TEXT FIELD"),
+        # a part name or filename in an encoding of its own is spelled as bytes: the shell hands
+        # curl the same bytes back, so the field keeps its name and the file its path
+        pytest.param(b'name="\xe9"\r\n\r\nv', "-F $'\\xe9=v'", id="FIELD NAME NOT UTF-8"),
+        pytest.param(b'name="f"; filename="caf\xe9.bin"\r\n\r\nx', "-F $'f=@caf\\xe9.bin'", id="FILENAME NOT UTF-8"),
+    ],
+)
+def test_to_curl_multipart_part_not_utf8(
+    part: bytes,
+    expected: str,
+) -> None:
+    # an encoding of its own is not something a client would produce — httpx and requests both
+    # write utf-8 — so the body is handed over the way it arrives on the wire, which is where the
+    # server-side adapters read it from
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": "multipart/form-data; boundary=b"},
+        data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
+    ).prepare()
+    assert f" {expected} " in to_curl(req)

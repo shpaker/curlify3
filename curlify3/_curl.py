@@ -1,6 +1,6 @@
 import re
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Final, NamedTuple, TypeAlias
 
 from curlify3._types import Body, Headers
@@ -12,8 +12,17 @@ Quote: TypeAlias = Callable[[str], str]
 BytesQuote: TypeAlias = Callable[[bytes], str]
 Options: TypeAlias = Mapping[str, str]
 
-MULTIPART_FORM_DATA: Final = re.compile(rb'form-data; name="(.[^"]+)"\r\n\r\n(.+)\r\n')
-MULTIPART_FILE_DATA: Final = re.compile(rb'form-data; name="(.[^"]+)"; filename="(.[^"]+)"')
+MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?')
+PART_NAME: Final = re.compile(rb'name="([^"]*)"')
+PART_FILENAME: Final = re.compile(rb'filename="([^"]*)"')
+
+# curl reads a leading @ in a --data value, and a leading @ or < in a --form value, as
+# "load the value from this file" rather than as the value itself. Such a value has to go
+# through the option that takes it literally: otherwise the command reads a local file and
+# sends it to the url it was rendered for — and through the server-side adapters the value
+# is the caller's to choose, so the file is the caller's to name
+DATA_FILE_REF: Final = "@"
+FORM_FILE_REF: Final = (b"@", b"<")
 
 PS_QUOTE: Final = re.compile(r'(\\*)"')
 PS_TRAILING_BACKSLASHES: Final = re.compile(r"\\+$")
@@ -33,9 +42,10 @@ SHORT_OPTIONS: Final[Options] = {
     "header": "-H",
     "cookie": "-b",
     "data": "-d",
-    # curl has no short form of --data-raw, hence the same string in both maps
+    # curl has no short form of --data-raw or --form-string, hence the same string in both maps
     "data_raw": "--data-raw",
     "form": "-F",
+    "form_string": "--form-string",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -44,6 +54,7 @@ LONG_OPTIONS: Final[Options] = {
     "data": "--data",
     "data_raw": "--data-raw",
     "form": "--form",
+    "form_string": "--form-string",
 }
 
 
@@ -100,7 +111,7 @@ def quote_powershell_bytes(
     value: bytes,
 ) -> str:
     raise ValueError(
-        "a body that is not valid utf-8 cannot be rendered for shell 'powershell': raw bytes "
+        "a value that is not valid utf-8 cannot be rendered for shell 'powershell': raw bytes "
         "have no spelling behind the --% stop-parsing token, use shell='sh' instead"
     )
 
@@ -134,6 +145,21 @@ SHELLS: Final[Mapping[str, ShellConfig]] = {
 }
 
 
+def reject_nul(
+    value: str | bytes,
+    what: str,
+) -> None:
+    # a command-line argument is NUL-terminated on every platform, so a NUL byte would
+    # silently truncate it, and a command that runs while sending something other than the
+    # request it was rendered from is worse than one that refuses to be rendered. A NUL is
+    # valid utf-8, so it arrives here as text as readily as it does as bytes
+    if (0 in value) if isinstance(value, bytes) else ("\x00" in value):
+        raise ValueError(
+            f"a {what} containing a NUL byte cannot be rendered as a curl command: a "
+            f"command-line argument is NUL-terminated, so the byte would silently truncate it"
+        )
+
+
 def make_curl_headers(
     headers: Headers,
     quote: Quote,
@@ -153,20 +179,67 @@ def make_curl_cookies(
     return [f"{options['cookie']} {quote_word(cookies)}"]
 
 
+def quote_multipart_part(
+    part: bytes,
+    quote: Quote,
+    quote_bytes: BytesQuote,
+) -> str:
+    # a part is matched out of the encoded body, so its name, value and filename are bytes and
+    # any of the three can turn out not to be text: a field value straight off the wire, or a
+    # filename in an encoding of its own. Such a part is spelled the way a body that did not
+    # decode is, through the dialect's byte quoting — which is also where powershell refuses it
+    reject_nul(part, "multipart field")
+    try:
+        return quote(part.decode())
+    except UnicodeDecodeError:
+        return quote_bytes(part)
+
+
+def split_multipart_body(
+    body: bytes,
+    boundary: bytes,
+) -> Iterator[tuple[bytes, bytes]]:
+    # a part is --boundary CRLF headers CRLF CRLF value CRLF, and the body is closed by
+    # --boundary--, whose chunk carries no CRLF CRLF and so drops out below. Splitting on the
+    # delimiter the sender chose is what lets a value hold a CRLF of its own: matching a
+    # value as one line truncated it there, and the command sent the prefix without a word
+    for chunk in body.split(b"--" + boundary)[1:]:
+        head, separator, value = chunk.partition(b"\r\n\r\n")
+        if separator:
+            yield head, value.removesuffix(b"\r\n")
+
+
 def make_multipart_curl_args(
     body: str | bytes,
+    content_type: str,
     quote: Quote,
+    quote_bytes: BytesQuote,
     options: Options,
 ) -> list[str]:
-    option = options["form"]
-    body_parts = []
+    boundary = MULTIPART_BOUNDARY.search(content_type)
+    # without the boundary parameter the body cannot be taken apart, and a body that cannot be
+    # taken apart has no parts to render — the same command a multipart content-type without a
+    # body produces
+    if boundary is None:
+        return []
     body = body.encode() if isinstance(body, str) else body
-    for matched in MULTIPART_FORM_DATA.finditer(body):
-        groups = matched.groups()
-        body_parts.append(f"{option} {quote(f'{groups[0].decode()}={groups[1].decode()}')}")
-    for matched in MULTIPART_FILE_DATA.finditer(body):
-        groups = matched.groups()
-        body_parts.append(f"{option} {quote(f'{groups[0].decode()}=@{groups[1].decode()}')}")
+    body_parts = []
+    for head, value in split_multipart_body(body, boundary.group(1).encode()):
+        name = PART_NAME.search(head)
+        if name is None:
+            continue
+        filename = PART_FILENAME.search(head)
+        if filename is not None:
+            # here the leading @ is the point: -F is what makes curl send the file the
+            # request sent, so a file part is spelled name=@filename
+            part, option = name.group(1) + b"=@" + filename.group(1), options["form"]
+        else:
+            # the value of a plain field is a literal, so --form-string as soon as it begins
+            # with a character -F would read as a file reference. -F stays the common case: it
+            # is the terser option and the value rarely begins with either character
+            part = name.group(1) + b"=" + value
+            option = options["form_string"] if value.startswith(FORM_FILE_REF) else options["form"]
+        body_parts.append(f"{option} {quote_multipart_part(part, quote, quote_bytes)}")
     return body_parts
 
 
@@ -181,24 +254,20 @@ def make_curl_body(
     if not body:
         return []
     # multipart comes first: such a body arrives as bytes whenever one of its file parts
-    # is binary, and the parts are matched and decoded individually below
-    if "multipart" in headers.get("content-type", ""):
-        return make_multipart_curl_args(body, quote, options)
-    # a command-line argument is NUL-terminated on every platform, so a NUL byte in the body
-    # would silently truncate it, and a command that runs while sending something other than
-    # the request it was rendered from is worse than one that refuses to be rendered. A NUL is
-    # valid utf-8, so it arrives here as text as readily as it does as bytes. The multipart
-    # branch above is exempt: it renders part names and filenames, never the file bytes
-    if (0 in body) if isinstance(body, bytes) else ("\x00" in body):
-        raise ValueError(
-            "a body containing a NUL byte cannot be rendered as a curl command: a command-line "
-            "argument is NUL-terminated, so the byte would silently truncate the body"
-        )
+    # is binary, and the parts are taken apart and rendered individually below — each with
+    # its own NUL check, since only part of such a body reaches the command line
+    content_type = headers.get("content-type", "")
+    if "multipart" in content_type:
+        return make_multipart_curl_args(body, content_type, quote, quote_bytes, options)
+    reject_nul(body, "body")
     if isinstance(body, bytes):
-        # the adapter could not decode it. --data-raw rather than --data, because both
-        # --data and --data-binary would read a leading @ as a filename to read instead
+        # the adapter could not decode it. --data-raw rather than --data, because both --data
+        # and --data-binary read a leading @ as a filename, and @ is an ordinary byte here
         return [f"{options['data_raw']} {quote_bytes(body)}"]
-    return [f"{options['data']} {quote(body)}"]
+    # the same file reference, in a body that did decode: --data would send the contents of
+    # the named file instead of the body the request carried
+    option = options["data_raw"] if body.startswith(DATA_FILE_REF) else options["data"]
+    return [f"{option} {quote(body)}"]
 
 
 def make_curl_string(
