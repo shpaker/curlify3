@@ -110,7 +110,7 @@ print(to_curl(req))
 
 ### Windows PowerShell
 
-By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get a command that pastes cleanly into Windows PowerShell / `pwsh`: the binary becomes `curl.exe` (plain `curl` is an alias for `Invoke-WebRequest` in Windows PowerShell), single quotes are escaped by doubling, and embedded double quotes are escaped as `\"` so JSON payloads survive PowerShell's argument passing to native executables.
+By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get a command that pastes cleanly into Windows PowerShell: the binary becomes `curl.exe` (plain `curl` is an alias for `Invoke-WebRequest` there), the URL, cookies, and all values are single-quoted with `'` doubled, and embedded double quotes are escaped as `\"` (doubling any backslash run in front of them) so JSON payloads survive the argument passing to native executables.
 
 ```python
 import requests
@@ -123,10 +123,10 @@ req = requests.Request(
 ).prepare()
 
 print(to_curl(req, shell="powershell"))
-# curl.exe -X POST -H 'content-type: application/json' -d '{\"date\": \"2026-08-10\"}' https://httpbin.org/post
+# curl.exe -X POST -H 'content-type: application/json' -d '{\"date\": \"2026-08-10\"}' 'https://httpbin.org/post'
 ```
 
-The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+The output targets Windows PowerShell 5.1 — the `powershell.exe` preinstalled on every Windows — and `pwsh` up to 7.2. `pwsh` 7.3+ changed how arguments are passed to native executables and would double-escape the quotes; run `$PSNativeCommandArgumentPassing = 'Legacy'` in such a session before pasting. The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
 
 ### `aiohttp` — server-side
 
@@ -166,7 +166,7 @@ Render a request object as a `curl` command. Use for synchronous request types (
 
 Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell / `pwsh`).
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1 / `pwsh` ≤ 7.2).
 
 Both functions raise `ValueError` if the request type or the `shell` value is not recognized.
 

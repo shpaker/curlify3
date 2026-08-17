@@ -16,6 +16,7 @@ from aiohttp.test_utils import TestClient
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
+from curlify3._curl import quote_powershell
 
 
 @pytest.fixture
@@ -446,7 +447,7 @@ _POWERSHELL_PARAMS = [
             method="GET",
             url="https://httpbin.org/get",
         ),
-        "curl.exe -H 'host: httpbin.org' https://httpbin.org/get",
+        "curl.exe -H 'host: httpbin.org' 'https://httpbin.org/get'",
         id="HEADER",
     ),
     pytest.param(
@@ -460,14 +461,34 @@ _POWERSHELL_PARAMS = [
     ),
     pytest.param(
         httpx.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        "curl.exe -b 'bar=baz' -H 'host: httpbin.org' 'https://httpbin.org/get'",
+        id="COOKIE",
+    ),
+    pytest.param(
+        httpx.Request(
             method="POST",
             url="https://httpbin.org/post",
             json={"date": "2026-08-10", "actionReference": "SEND_TOTAL_FLOW_TO_COUNTERPART"},
         ),
         "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/json' "
         r"-d '{\"date\":\"2026-08-10\",\"actionReference\":\"SEND_TOTAL_FLOW_TO_COUNTERPART\"}' "
-        "https://httpbin.org/post",
+        "'https://httpbin.org/post'",
         id="JSON",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"msg": 'say "hi" now'},
+        ),
+        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/json' "
+        r"-d '{\"msg\":\"say \\\"hi\\\" now\"}' "
+        "'https://httpbin.org/post'",
+        id="ESCAPED QUOTES",
     ),
     pytest.param(
         httpx.Request(
@@ -475,8 +496,29 @@ _POWERSHELL_PARAMS = [
             url="https://httpbin.org/post",
             content="it's",
         ),
-        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'it''s' https://httpbin.org/post",
+        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: plain/text' -d 'it''s' 'https://httpbin.org/post'",
         id="SINGLE QUOTE",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            data={"bar": "baz", "abc": "123"},
+        ),
+        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: application/x-www-form-urlencoded' "
+        "-d 'bar=baz&abc=123' 'https://httpbin.org/post'",
+        id="FORM",
+    ),
+    pytest.param(
+        httpx.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
+            data={"foo": "bar"},
+        ),
+        "curl.exe -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' "
+        "-F 'foo=bar' -F 'image=@image.png' 'https://httpbin.org/post'",
+        id="FILE + FORM",
     ),
 ]
 
@@ -490,6 +532,9 @@ def test_httpx_to_curl_powershell(
     expected: str,
 ) -> None:
     results = to_curl(req, shell=POWERSHELL)
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -503,10 +548,35 @@ async def test_httpx_async_to_curl_powershell(
     expected: str,
 ) -> None:
     results = await to_curl_async(req, shell=POWERSHELL)
+    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
     assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        pytest.param('{"bar":"baz"}', r"'{\"bar\":\"baz\"}'", id="QUOTES"),
+        pytest.param('{"name": "O\'Brien"}', r"'{\"name\": \"O''Brien\"}'", id="SINGLE QUOTE"),
+        pytest.param(r'{"path": "C:\\x"}', r"'{\"path\": \"C:\\x\"}'", id="BACKSLASHES"),
+        pytest.param(r'x\"y', r"'x\\\"y'", id="BACKSLASH BEFORE QUOTE"),
+        pytest.param("ab\\", r"'ab\'", id="TRAILING BACKSLASH BARE"),
+        pytest.param("a b\\", r"'a b\\'", id="TRAILING BACKSLASH QUOTED"),
+    ],
+)
+def test_quote_powershell(value: str, expected: str) -> None:
+    assert quote_powershell(value) == expected
 
 
 def test_to_curl_unknown_shell() -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get")
     with pytest.raises(ValueError, match="unknown shell"):
         to_curl(req, shell="fish")
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_unknown_shell() -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get")
+    with pytest.raises(ValueError, match="unknown shell"):
+        await to_curl_async(req, shell="fish")

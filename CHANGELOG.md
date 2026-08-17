@@ -3,7 +3,8 @@
 ## 0.8 (2026-08-17)
 
 ### Added
-- Windows PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `to_curl(request, shell="powershell")` and `to_curl_async(request, shell="powershell")` render the command as `curl.exe …` with PowerShell-safe quoting — embedded double quotes become `\"` so JSON payloads survive argument passing to native executables, and single quotes are doubled. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported. Default (`shell="sh"`) output is unchanged.
+- Windows PowerShell output ([#7](https://github.com/shpaker/curlify3/issues/7)): `to_curl(request, shell="powershell")` and `to_curl_async(request, shell="powershell")` render the command as `curl.exe …` with PowerShell-safe quoting — embedded double quotes become `\"` (any backslash run in front of them doubles, as does a trailing run in whitespace-carrying values), single quotes are doubled, and the URL and cookies are always quoted (`,`, `;`, `$` are PowerShell metacharacters). Targets Windows PowerShell 5.1 / `pwsh` ≤ 7.2. Constants `curlify3.SH` and `curlify3.POWERSHELL` are exported. Default (`shell="sh"`) output is unchanged.
+- End-to-end shell tests (`test_shell_e2e.py`): the generated command is executed by a real shell — bash on POSIX, `powershell.exe` 5.1 on Windows — against a local HTTP server that checks the request arrives byte-for-byte. CI gained a `windows-latest` job and a manual `workflow_dispatch` trigger.
 
 ## 0.7 (2026-06-05)
 

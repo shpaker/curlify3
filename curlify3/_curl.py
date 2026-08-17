@@ -1,11 +1,16 @@
 import re
 
 from asyncio import iscoroutine
+from typing import Callable, NamedTuple
 
 from curlify3._utils import make_request_obj, make_request_obj_async
 
 MULTIPART_FORM_DATA = re.compile(rb'form-data; name="(.[^"]+)"\r\n\r\n(.+)\r\n')
 MULTIPART_FILE_DATA = re.compile(rb'form-data; name="(.[^"]+)"; filename="(.[^"]+)"')
+
+PS_QUOTE = re.compile(r'(\\*)"')
+PS_TRAILING_BACKSLASHES = re.compile(r"\\+$")
+PS_WHITESPACE = re.compile(r"\s")
 
 SH = "sh"
 POWERSHELL = "powershell"
@@ -15,21 +20,38 @@ def quote_sh(value):
     return f"'{value}'"
 
 
+def quote_sh_url(url):
+    return url if not "&" in url else quote_sh(url)
+
+
+def quote_sh_cookies(cookies):
+    return quote_sh(cookies) if " " in cookies else cookies
+
+
 def quote_powershell(value):
-    # inside PowerShell single-quoted literals a quote is escaped by doubling it;
-    # double quotes need \" to survive argument passing to a native executable (curl.exe)
-    escaped = str(value).replace("'", "''").replace('"', '\\"')
-    return f"'{escaped}'"
+    # targets Windows PowerShell 5.1 / pwsh <= 7.2, which pass arguments to native executables
+    # (curl.exe) unescaped, so the value must survive two parsers: MSVCRT command-line rules
+    # first — a double quote becomes \" and any run of backslashes directly before it doubles;
+    # a value with whitespace gets wrapped in "..." on the native command line, so a trailing
+    # backslash run doubles too — then a PowerShell single-quoted literal, where ' doubles
+    value = PS_QUOTE.sub(lambda matched: matched.group(1) * 2 + '\\"', str(value))
+    if PS_WHITESPACE.search(value):
+        value = PS_TRAILING_BACKSLASHES.sub(lambda matched: matched.group() * 2, value)
+    return "'" + value.replace("'", "''") + "'"
+
+
+class ShellConfig(NamedTuple):
+    binary: str
+    quote: Callable
+    quote_url: Callable
+    quote_cookies: Callable
 
 
 SHELLS = {
-    SH: ("curl", quote_sh),
-    POWERSHELL: ("curl.exe", quote_powershell),
+    SH: ShellConfig("curl", quote_sh, quote_sh_url, quote_sh_cookies),
+    # url and cookies are always quoted: unquoted `,` `;` `$` `(` are PowerShell metacharacters
+    POWERSHELL: ShellConfig("curl.exe", quote_powershell, quote_powershell, quote_powershell),
 }
-
-
-def make_full_url(url, quote):
-    return url if not "&" in url else quote(url)
 
 
 def make_curl_headers(headers, quote):
@@ -39,12 +61,10 @@ def make_curl_headers(headers, quote):
     return " ".join(results)
 
 
-def make_curl_cookies(cookies, quote):
+def make_curl_cookies(cookies, quote_cookies):
     if not cookies:
         return None
-    if " " in cookies:
-        cookies = quote(cookies)
-    return f"-b {cookies}"
+    return f"-b {quote_cookies(cookies)}"
 
 
 def make_multipart_curl_args(body, quote):
@@ -70,19 +90,19 @@ def make_curl_body(body, headers, quote):
 def make_curl_string(method, url, headers, body, cookies, http2=False, shell=SH):
     if shell not in SHELLS:
         raise ValueError(f"unknown shell: {shell!r}, expected one of {sorted(SHELLS)}")
-    binary, quote = SHELLS[shell]
+    shell_conf = SHELLS[shell]
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
         headers["content-type"] = "plain/text"
     cli_parts = [
-        binary,
+        shell_conf.binary,
         "--http2" if http2 else None,
         f"-X {method}" if method != "GET" else None,
-        make_curl_cookies(cookies, quote),
-        make_curl_headers(headers, quote),
-        make_curl_body(body, headers, quote),
-        make_full_url(url, quote),
+        make_curl_cookies(cookies, shell_conf.quote_cookies),
+        make_curl_headers(headers, shell_conf.quote),
+        make_curl_body(body, headers, shell_conf.quote),
+        shell_conf.quote_url(url),
     ]
     return " ".join([str(entity) for entity in cli_parts if entity])
 
