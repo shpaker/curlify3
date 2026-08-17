@@ -18,6 +18,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Zero runtime dependencies
+- Fully annotated and `py.typed`, so the types reach your own type checker
 
 ## Installation
 
@@ -231,11 +232,14 @@ The project uses [`uv`](https://docs.astral.sh/uv/) and [`just`](https://just.sy
 
 ```sh
 uv sync --group dev
-just tests   # uv run pytest -vv
-just fmt     # isort + black
+just tests   # pytest
+just lint    # ruff format --check, ruff check, ty check
+just fmt     # ruff format, ruff check --fix
 ```
 
-CI runs the test suite on Python 3.10–3.14.
+Formatting and linting are handled by [`ruff`](https://docs.astral.sh/ruff/), type checking by [`ty`](https://docs.astral.sh/ty/).
+
+CI runs the linter and the type checker on every pull request, and the test suite on Python 3.10–3.14.
 
 ## Changelog
 
