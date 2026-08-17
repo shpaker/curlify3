@@ -1,15 +1,18 @@
-SOURCE_DIR := "curlify3"
-
 tests: pytest
-fmt: isort black
+lint: format-check check types
 
-isort:
-  uv run isort {{ SOURCE_DIR }} --diff
-  uv run isort test_curlify3.py --diff
+fmt:
+  uv run ruff format .
+  uv run ruff check . --fix
 
-black:
-  uv run isort {{ SOURCE_DIR }}
-  uv run isort test_curlify3.py
+format-check:
+  uv run ruff format --check .
+
+check:
+  uv run ruff check .
+
+types:
+  uv run ty check
 
 pytest:
   uv run pytest -vv
