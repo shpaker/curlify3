@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9 (2026-08-17)
 
 ### Added
 - Readable output ([#6](https://github.com/shpaker/curlify3/issues/6)): `pretty=True` on `to_curl()` / `to_curl_async()` puts the url on the first line and every option on its own, `long_options=True` renders `--request` / `--header` / `--cookie` / `--data` / `--form` instead of the short names. The two are independent and both default to `False`, so the one-line output is unchanged. `pretty=True` raises `ValueError` for `shell="powershell"`, where the `--%` token is effective only until the next newline.
