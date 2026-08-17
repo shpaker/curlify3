@@ -4,8 +4,25 @@ version = "0.1.0"
 description = "yet another library to convert request object to curl command"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "A.Shpak", email = "shpaker@gmail.com"},
+]
+# the pypi badge in the README reads the python versions off these; no License ::
+# classifier, it is superseded by the SPDX expression above (PEP 639)
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Internet :: WWW/HTTP",
+    "Typing :: Typed",
 ]
 
 [project.urls]
