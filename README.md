@@ -12,7 +12,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 ## Features
 
 - Single dispatch entrypoint — `to_curl()` (sync) and `to_curl_async()` (async)
-- Works with **client-side** requests (`requests`, `httpx`, `httpx2`) and **server-side** incoming requests (`aiohttp.web`, `starlette` / `fastapi`)
+- Works with **client-side** requests (`requests`, `niquests`, `httpx`, `httpx2`, `aiohttp`, `tornado`, stdlib `urllib.request`) and **server-side** incoming requests (`aiohttp.web`, `starlette` / `fastapi`, `django`, `flask` / `werkzeug`, `tornado`)
 - Faithful rendering of headers, query parameters, cookies (`-b`), and bodies, quoted so the command survives the shell even when the values came from an untrusted client
 - Body payloads: text, JSON, form-encoded, multipart, binary
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
@@ -35,12 +35,17 @@ Requires **Python 3.10+**.
 | `requests` | ✅ | ✅ | ✅ |
 | `httpx` | ❌ | ✅ | ✅ |
 | `httpx2` (HTTP/2) | ❌ | ❌ | ✅ |
-| `aiohttp` (server-side) | ❌ | ❌ | ✅ |
+| `niquests` | ❌ | ❌ | ✅ |
+| `urllib.request` (stdlib) | ❌ | ❌ | ✅ |
+| `aiohttp` (client and server) | ❌ | ❌ | ✅ |
+| `tornado` (client and server) | ❌ | ❌ | ✅ |
 | `starlette` / `fastapi` (server-side) | ❌ | ❌ | ✅ |
+| `django` (server-side) | ❌ | ❌ | ✅ |
+| `flask` / `werkzeug` (server-side) | ❌ | ❌ | ✅ |
 | Async API | ❌ | ❌ | ✅ |
 | Python | 3.7+ | 3.7–3.11 | 3.10+ |
 
-`curlify` is the original and covers only `requests`. `curlify2` added `httpx` but is sync-only, client-side-only, and has not seen a release since 2023. `curlify3` extends the same idea with HTTP/2 (`httpx2`), an async entrypoint, and server-side adapters for `aiohttp` and `starlette` / `fastapi` so you can dump incoming requests as `curl` from inside a handler.
+`curlify` is the original and covers only `requests`. `curlify2` added `httpx` but is sync-only, client-side-only, and has not seen a release since 2023. `curlify3` extends the same idea across the ecosystem: HTTP/2 (`httpx2`), an async entrypoint, the rest of the popular clients down to the stdlib's `urllib.request`, and server-side adapters for `aiohttp`, `starlette` / `fastapi`, `django`, `flask` / `werkzeug` and `tornado` so you can dump incoming requests as `curl` from inside a handler.
 
 ## Quick start
 
@@ -63,6 +68,23 @@ import requests
 from curlify3 import to_curl
 
 req = requests.Request(
+    "POST",
+    "https://httpbin.org/post",
+    json={"hello": "world"},
+).prepare()
+
+print(to_curl(req))
+```
+
+### `niquests`
+
+The prepared request mirrors `requests`, and so does the call. HTTP/2 and HTTP/3 are negotiated on the transport, so the command carries no `--http2`.
+
+```python
+import niquests
+from curlify3 import to_curl
+
+req = niquests.Request(
     "POST",
     "https://httpbin.org/post",
     json={"hello": "world"},
@@ -109,6 +131,39 @@ print(to_curl(req))
 ```
 
 `to_curl_async()` works with `httpx2.Request` too.
+
+### `urllib.request` — stdlib
+
+No third-party client required. A request without an explicit `method` renders the one urllib would send: `POST` when it carries `data`, `GET` otherwise.
+
+```python
+import urllib.request
+from curlify3 import to_curl
+
+req = urllib.request.Request(
+    "https://httpbin.org/post",
+    data=b'{"hello": "world"}',
+    headers={"Content-Type": "application/json"},
+)
+
+print(to_curl(req))
+# curl -X POST -H 'content-type: application/json' -d '{"hello": "world"}' https://httpbin.org/post
+```
+
+### `tornado` — client-side
+
+```python
+import tornado.httpclient
+from curlify3 import to_curl
+
+req = tornado.httpclient.HTTPRequest(
+    "https://httpbin.org/post",
+    method="POST",
+    body='{"hello": "world"}',
+)
+
+print(to_curl(req))
+```
 
 ### Readable output
 
@@ -172,6 +227,26 @@ print(to_curl(req, shell="powershell"))
 
 The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
 
+### `aiohttp` — client-side
+
+Client middlewares (aiohttp 3.12+) are where an outgoing `aiohttp.ClientRequest` is reachable. Rendering the command does not consume the payload — in-memory bodies hand back their value, files seek back, and async iterables are cached and replayed when the request is sent (that non-consuming read needs aiohttp 3.12.1+; below it, streaming bodies render without `-d`).
+
+```python
+import asyncio
+import aiohttp
+from curlify3 import to_curl_async
+
+async def log_as_curl(request, handler):
+    print(await to_curl_async(request))
+    return await handler(request)
+
+async def main():
+    async with aiohttp.ClientSession(middlewares=(log_as_curl,)) as session:
+        await session.post("https://httpbin.org/post", json={"hello": "world"})
+
+asyncio.run(main())
+```
+
 ### `aiohttp` — server-side
 
 Render an incoming request inside a handler. The async variant is required because the body is read from the stream.
@@ -200,15 +275,55 @@ async def echo(request: Request):
     return {"curl": curl}
 ```
 
+### `django` — server-side
+
+Django buffers the body before the view runs, so the sync `to_curl()` is enough — including inside async views. If the stream was consumed without buffering (multipart parsing, `request.read()`), the command carries the headers but no `-d`.
+
+```python
+from django.http import JsonResponse
+from curlify3 import to_curl
+
+def echo(request):
+    return JsonResponse({"curl": to_curl(request)})
+```
+
+### `flask` / `werkzeug` — server-side
+
+The adapter targets `werkzeug.wrappers.Request`, which covers Flask through its Werkzeug base — plain Werkzeug apps work the same way.
+
+```python
+import flask
+from curlify3 import to_curl
+
+app = flask.Flask(__name__)
+
+@app.post("/echo")
+def echo():
+    return {"curl": to_curl(flask.request)}
+```
+
+### `tornado` — server-side
+
+The framework reads the body before the handler runs, so the incoming request renders synchronously.
+
+```python
+import tornado.web
+from curlify3 import to_curl
+
+class EchoHandler(tornado.web.RequestHandler):
+    def post(self):
+        self.write({"curl": to_curl(self.request)})
+```
+
 ## API
 
 ### `to_curl(request, shell="sh", pretty=False, long_options=False) -> str`
 
-Render a request object as a `curl` command. Use for synchronous request types (`requests.PreparedRequest`, `httpx.Request`, `httpx2.Request`).
+Render a request object as a `curl` command. Use for synchronous client-side request types (`requests.PreparedRequest`, `niquests.PreparedRequest`, `httpx.Request`, `httpx2.Request`, `urllib.request.Request`, `tornado.httpclient.HTTPRequest`) and for server-side requests whose body the framework has already buffered (`django.http.HttpRequest`, `werkzeug.wrappers.Request` / `flask.Request`, `tornado.httputil.HTTPServerRequest`).
 
 ### `to_curl_async(request, shell="sh", pretty=False, long_options=False) -> str`
 
-Async variant. Use for server-side request objects whose body must be `await`-ed (`aiohttp.web.Request`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
+Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.web.Request`, `aiohttp.ClientRequest`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
 `shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options.
 
@@ -219,10 +334,17 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Library | Type | `to_curl` | `to_curl_async` | Notes |
 | --- | --- | :---: | :---: | --- |
 | `requests` | `PreparedRequest` | ✅ | — | Pass `Request(...).prepare()` |
+| `niquests` | `PreparedRequest` | ✅ | — | Pass `Request(...).prepare()`; HTTP/2 and HTTP/3 live on the transport, so no `--http2` |
 | `httpx` | `httpx.Request` | ✅ | ✅ | |
 | `httpx2` | `httpx2.Request` | ✅ | ✅ | Adds `--http2` |
+| `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method is inferred the way urllib sends it |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
+| `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
 | `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream |
+| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d` |
+| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base |
+| `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side |
+| `tornado` | `tornado.httputil.HTTPServerRequest` | ✅ | — | Server-side, body already read |
 
 ## Payload handling
 

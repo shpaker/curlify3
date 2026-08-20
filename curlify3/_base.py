@@ -47,17 +47,23 @@ class _RequestData(ABC, Generic[RequestT]):
         self,
     ) -> Headers:
         headers = {name.lower(): _header_value(value) for name, value in dict(self._request.headers).items()}
-        if self._request.headers.get("cookie"):
-            del headers["cookie"]
+        # dropped even when empty: a value, when there is one, travels as -b
+        # instead, and an empty cookie header carries nothing worth repeating
+        # (django's RequestFactory sets one on every request it builds)
+        headers.pop("cookie", None)
         return headers
 
     @property
     def cookies(
         self,
     ) -> str | None:
-        if "cookie" not in self._request.headers:
-            return None
-        return _header_value(self._request.headers.get("cookie"))
+        # scanned rather than looked up: not every wrapped container is
+        # case-insensitive (tornado's client request keeps whatever plain dict
+        # it was handed), and the headers property already trusts dict() alone
+        for name, value in dict(self._request.headers).items():
+            if name.lower() == "cookie":
+                return _header_value(value)
+        return None
 
 
 # the sync and async bases are siblings on purpose: an async body() cannot

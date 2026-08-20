@@ -25,7 +25,7 @@ updates:
         # apart from the test stack so it stays easy to revert
         patterns: ["ruff", "ty"]
       test-stack:
-        patterns: ["pytest*", "requests", "httpx*", "aiohttp", "fastapi"]
+        patterns: ["pytest*", "requests", "niquests", "httpx*", "aiohttp", "fastapi", "django", "flask", "tornado"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

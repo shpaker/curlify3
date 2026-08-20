@@ -1,16 +1,29 @@
+import asyncio
 import pathlib
 import sys
+import urllib.request
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiohttp
 import fastapi
+import flask
 import httpx
 import httpx2
+import niquests
 import pytest
 import requests
+import tornado.httpclient
+import tornado.httputil
+import werkzeug
+import werkzeug.test
+import yarl
 
 from aiohttp import web as aiohttp_web
+from django.conf import settings as django_settings
+from django.http import HttpRequest as DjangoHttpRequest
+from django.test import RequestFactory
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
@@ -18,12 +31,22 @@ from curlify3._curl import quote_powershell, quote_sh, quote_sh_bytes, quote_sh_
 
 # imported directly so a broken adapter module fails collection loudly instead
 # of quietly disappearing from the registries under suppress(ImportError)
-from curlify3._req_aiohttp import AiohttpServerRequest
+from curlify3._req_aiohttp import AiohttpClientRequest, AiohttpServerRequest
+from curlify3._req_django import DjangoRequest
 from curlify3._req_httpx import AsyncHttpxRequest, HttpxRequest
 from curlify3._req_httpx2 import AsyncHttpx2Request, Httpx2Request
+from curlify3._req_niquests import NiquestsRequest
 from curlify3._req_requests import RequestsRequest
 from curlify3._req_starlette import StarletteRequest
+from curlify3._req_tornado import TornadoRequest, TornadoServerRequest
+from curlify3._req_urllib import UrllibRequest
+from curlify3._req_werkzeug import WerkzeugRequest
 from curlify3._utils import _REQUEST_DATA_CLASSES, _REQUEST_DATA_CLASSES_ASYNC
+
+# RequestFactory-built requests need configured settings by the time
+# build_absolute_uri() validates the host inside to_curl
+if not django_settings.configured:
+    django_settings.configure(ALLOWED_HOSTS=["testserver"])
 
 
 @pytest.fixture
@@ -296,6 +319,110 @@ def test_requests_to_curl(
     assert results == expected, results
 
 
+_NIQUESTS_PARAMS = [
+    pytest.param(
+        niquests.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+        ),
+        "curl https://httpbin.org/get",
+        id="HEADER",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            # a str value, unlike the requests case: niquests annotates params
+            # strictly and an int fails the type check
+            params={"foo": "911", "bar": "baz"},
+        ),
+        "curl 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        "curl -b bar=baz https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            data={"bar": "baz", "abc": "123"},
+        ),
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'bar=baz&abc=123' https://httpbin.org/post",
+        id="FORM",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            data="foo",
+        ),
+        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            json={"bar": "baz"},
+        ),
+        # niquests spells the content type with an explicit charset, unlike requests
+        "curl -X POST -H 'content-type: application/json;charset=utf-8' -d '{\"bar\": \"baz\"}' https://httpbin.org/post",
+        id="JSON",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
+        ),
+        "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'image=@image.png' https://httpbin.org/post",
+        id="FILE",
+    ),
+    pytest.param(
+        niquests.Request(
+            method="POST",
+            url="https://httpbin.org/post",
+            files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
+            data={"foo": "bar"},
+        ),
+        "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
+        id="FILE + FORM",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _NIQUESTS_PARAMS,
+)
+def test_niquests_to_curl(
+    req: niquests.Request,
+    expected: str,
+) -> None:
+    prepared = req.prepare()
+    results = to_curl(prepared)
+    # niquests declares headers as optional; a prepared request always has them
+    content_type = prepared.headers.get("content-type") if prepared.headers is not None else None
+    if isinstance(content_type, str) and "boundary" in content_type:
+        boundary = content_type.rsplit("boundary=")[1]
+        expected = expected.format(boundary=boundary)
+    assert results == expected, results
+
+
+def test_niquests_streaming_body_is_dropped() -> None:
+    # same contract as the requests adapter: an iterable body has no textual
+    # form a shell could run, so the command carries the headers but no -d
+    req = niquests.Request(method="POST", url="https://httpbin.org/post", data=iter([b"chunk"])).prepare()
+    assert to_curl(req) == "curl -X POST -H 'transfer-encoding: chunked' https://httpbin.org/post"
+
+
 @pytest.mark.parametrize(
     "req, expected",
     _PARAMS,
@@ -409,6 +536,142 @@ async def test_aiohttp_async_to_curl(
     )
     expected = expected.format(**args)
     assert results == expected, results
+
+
+async def _aiohttp_chunks() -> AsyncIterator[bytes]:
+    yield b"chunk"
+
+
+_AIOHTTP_CLIENT_PARAMS = [
+    pytest.param(
+        dict(
+            method="GET",
+            url="https://httpbin.org/get",
+        ),
+        "curl -H 'host: httpbin.org' https://httpbin.org/get",
+        id="HEADER",
+    ),
+    pytest.param(
+        dict(
+            method="GET",
+            url="https://httpbin.org/get",
+            params={"foo": 911, "bar": "baz"},
+        ),
+        "curl -H 'host: httpbin.org' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        dict(
+            method="GET",
+            url="https://httpbin.org/get",
+            cookies={"bar": "baz"},
+        ),
+        "curl -b bar=baz -H 'host: httpbin.org' https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        dict(
+            method="POST",
+            url="https://httpbin.org/post",
+            data="foo",
+        ),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain; charset=utf-8' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        dict(
+            method="POST",
+            url="https://httpbin.org/post",
+            headers={"content-type": "application/json"},
+            data=b'{"bar": "baz"}',
+        ),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/json' -d '{\"bar\": \"baz\"}' https://httpbin.org/post",
+        id="JSON",
+    ),
+    pytest.param(
+        dict(
+            method="POST",
+            url="https://httpbin.org/post",
+            data=b"\xff\xfe\x81binary",
+        ),
+        r"curl -X POST -H 'host: httpbin.org' -H 'content-type: application/octet-stream' "
+        r"--data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        id="BINARY",
+    ),
+    pytest.param(
+        dict(
+            method="POST",
+            url="https://httpbin.org/post",
+            data=_aiohttp_chunks(),
+        ),
+        # as_bytes() caches the drained chunks, so the body is rendered and the
+        # payload still replays when the request is sent
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/octet-stream' "
+        "-H 'transfer-encoding: chunked' -d 'chunk' https://httpbin.org/post",
+        id="CHUNKED",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req_kwargs, expected",
+    _AIOHTTP_CLIENT_PARAMS,
+)
+@pytest.mark.asyncio
+async def test_aiohttp_client_async_to_curl(
+    req_kwargs: dict[str, Any],
+    expected: str,
+) -> None:
+    kwargs = dict(req_kwargs)
+    req = aiohttp.ClientRequest(
+        url=yarl.URL(kwargs.pop("url")),
+        # the auto headers vary with the environment, and the point here is
+        # the request the caller shaped
+        skip_auto_headers=("Accept", "Accept-Encoding", "User-Agent"),
+        loop=asyncio.get_running_loop(),
+        **kwargs,
+    )
+    results = await to_curl_async(req)
+    assert results == expected, results
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_client_middleware_to_curl(
+    aiohttp_client: AiohttpClient,
+) -> None:
+    # the natural place to reach a ClientRequest is a client middleware
+    # (aiohttp >= 3.12); rendering the command must not consume the payload
+    # the session is about to send
+    app = aiohttp_web.Application()
+
+    async def echo(
+        request: aiohttp_web.Request,
+    ) -> aiohttp_web.Response:
+        return aiohttp_web.Response(body=await request.read())
+
+    app.router.add_post('/', echo)
+    captured: list[str] = []
+
+    async def middleware(
+        request: aiohttp.ClientRequest,
+        handler: aiohttp.ClientHandlerType,
+    ) -> aiohttp.ClientResponse:
+        captured.append(await to_curl_async(request))
+        return await handler(request)
+
+    client = await aiohttp_client(app, middlewares=(middleware,))
+    response = await client.post('/', data=b'content')
+    assert response.status == 200, response.status
+    # the body arrived byte-for-byte, so reading it for the command kept it intact
+    assert await response.text() == 'content'
+    accept_encoding = response.request_info.headers['Accept-Encoding']
+    user_agent = response.request_info.headers['User-Agent']
+    server = f'{client.host}:{client.port}'
+    assert captured == [
+        f"curl -X POST -H 'host: {server}' -H 'accept: */*' "
+        f"-H 'accept-encoding: {accept_encoding}' -H 'user-agent: {user_agent}' "
+        f"-H 'content-type: application/octet-stream' -d 'content' http://{server}/"
+    ], captured
 
 
 _HTTPX2_PARAMS = [
@@ -835,16 +1098,345 @@ def test_to_curl_pretty_powershell() -> None:
         to_curl(req, shell=POWERSHELL, pretty=True)
 
 
+# RequestFactory builds real WSGIRequest objects without a server; settings
+# are configured at the top of the module
+_DJANGO_RF = RequestFactory()
+_DJANGO_PARAMS = [
+    pytest.param(
+        _DJANGO_RF.get("/get"),
+        "curl http://testserver/get",
+        id="GET",
+    ),
+    pytest.param(
+        _DJANGO_RF.get("/get?foo=911&bar=baz", headers={"X-Foo": "bar"}),
+        "curl -H 'x-foo: bar' 'http://testserver/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        _DJANGO_RF.get("/get", headers={"Cookie": "bar=baz"}),
+        "curl -b bar=baz http://testserver/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        _DJANGO_RF.post("/post", data="foo", content_type="text/plain"),
+        "curl -X POST -H 'content-type: text/plain' -d 'foo' http://testserver/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        _DJANGO_RF.post("/post", data="bar=baz&abc=123", content_type="application/x-www-form-urlencoded"),
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'bar=baz&abc=123' http://testserver/post",
+        id="FORM",
+    ),
+    pytest.param(
+        # RequestFactory multipart-encodes a dict body, with a fixed boundary
+        _DJANGO_RF.post("/post", data={"bar": "baz"}),
+        "curl -X POST -H 'content-type: multipart/form-data; boundary=BoUnDaRyStRiNg' -F 'bar=baz' http://testserver/post",
+        id="MULTIPART",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _DJANGO_PARAMS,
+)
+def test_django_to_curl(
+    req: DjangoHttpRequest,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+def test_django_consumed_body_is_dropped() -> None:
+    # multipart parsing reads the stream directly, so request.body raises
+    # RawPostDataException afterwards; nothing recoverable is left and the
+    # command carries the headers but no -F
+    request = _DJANGO_RF.post("/post", data={"bar": "baz"})
+    _ = request.POST
+    assert to_curl(request) == (
+        "curl -X POST -H 'content-type: multipart/form-data; boundary=BoUnDaRyStRiNg' http://testserver/post"
+    )
+
+
+def _werkzeug_request(
+    **kwargs: Any,  # noqa: ANN401
+) -> werkzeug.Request:
+    return werkzeug.test.EnvironBuilder(base_url="https://httpbin.org", **kwargs).get_request()
+
+
+_WERKZEUG_PARAMS = [
+    pytest.param(
+        _werkzeug_request(path="/get"),
+        "curl -H 'host: httpbin.org' https://httpbin.org/get",
+        id="GET",
+    ),
+    pytest.param(
+        _werkzeug_request(path="/get", query_string="foo=911&bar=baz", headers={"X-Foo": "bar"}),
+        "curl -H 'host: httpbin.org' -H 'x-foo: bar' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        _werkzeug_request(path="/get", headers={"Cookie": "bar=baz"}),
+        "curl -b bar=baz -H 'host: httpbin.org' https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        _werkzeug_request(path="/post", method="POST", data="foo"),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        _werkzeug_request(path="/post", method="POST", data={"bar": "baz", "abc": "123"}),
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/x-www-form-urlencoded' -d 'bar=baz&abc=123' https://httpbin.org/post",
+        id="FORM",
+    ),
+    pytest.param(
+        _werkzeug_request(path="/post", method="POST", data=b"\xff\xfe\x81binary"),
+        r"curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        id="BINARY",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _WERKZEUG_PARAMS,
+)
+def test_werkzeug_to_curl(
+    req: werkzeug.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+def test_flask_to_curl() -> None:
+    # flask.Request subclasses werkzeug's, so the flask request proxy
+    # dispatches to the werkzeug adapter
+    app = flask.Flask(__name__)
+    with app.test_request_context("/post", base_url="https://httpbin.org", method="POST", data="foo"):
+        results = to_curl(flask.request)
+    assert (
+        results == "curl -X POST -H 'host: httpbin.org' -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post"
+    )
+
+
+_TORNADO_PARAMS = [
+    pytest.param(
+        tornado.httpclient.HTTPRequest(
+            "https://httpbin.org/get",
+        ),
+        "curl https://httpbin.org/get",
+        id="GET",
+    ),
+    pytest.param(
+        tornado.httpclient.HTTPRequest(
+            "https://httpbin.org/get?foo=911&bar=baz",
+            headers={"X-Foo": "bar"},
+        ),
+        "curl -H 'x-foo: bar' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        # the client request keeps whatever headers container it was handed —
+        # here a plain case-sensitive dict — and the cookie still reaches -b
+        tornado.httpclient.HTTPRequest(
+            "https://httpbin.org/get",
+            headers={"Cookie": "bar=baz"},
+        ),
+        "curl -b bar=baz https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        tornado.httpclient.HTTPRequest(
+            "https://httpbin.org/post",
+            method="POST",
+            body="foo",
+        ),
+        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        tornado.httpclient.HTTPRequest(
+            "https://httpbin.org/post",
+            method="POST",
+            body=b"\xff\xfe\x81binary",
+        ),
+        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        id="BINARY",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _TORNADO_PARAMS,
+)
+def test_tornado_to_curl(
+    req: tornado.httpclient.HTTPRequest,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+_TORNADO_SERVER_PARAMS = [
+    pytest.param(
+        tornado.httputil.HTTPServerRequest(
+            method="GET",
+            uri="/get",
+            host="httpbin.org",
+        ),
+        "curl http://httpbin.org/get",
+        id="GET",
+    ),
+    pytest.param(
+        tornado.httputil.HTTPServerRequest(
+            method="GET",
+            uri="/get?foo=911&bar=baz",
+            host="httpbin.org",
+            headers=tornado.httputil.HTTPHeaders({"X-Foo": "bar"}),
+        ),
+        "curl -H 'x-foo: bar' 'http://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        tornado.httputil.HTTPServerRequest(
+            method="GET",
+            uri="/get",
+            host="httpbin.org",
+            headers=tornado.httputil.HTTPHeaders({"Cookie": "bar=baz"}),
+        ),
+        "curl -b bar=baz http://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        tornado.httputil.HTTPServerRequest(
+            method="POST",
+            uri="/post",
+            host="httpbin.org",
+            headers=tornado.httputil.HTTPHeaders({"Content-Type": "text/plain"}),
+            body=b"foo",
+        ),
+        "curl -X POST -H 'content-type: text/plain' -d 'foo' http://httpbin.org/post",
+        id="TEXT",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _TORNADO_SERVER_PARAMS,
+)
+def test_tornado_server_to_curl(
+    req: tornado.httputil.HTTPServerRequest,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+_URLLIB_PARAMS = [
+    pytest.param(
+        urllib.request.Request(
+            "https://httpbin.org/get",
+        ),
+        "curl https://httpbin.org/get",
+        id="GET",
+    ),
+    pytest.param(
+        urllib.request.Request(
+            "https://httpbin.org/get?foo=911&bar=baz",
+            headers={"X-Foo": "bar"},
+        ),
+        "curl -H 'x-foo: bar' 'https://httpbin.org/get?foo=911&bar=baz'",
+        id="PARAMS",
+    ),
+    pytest.param(
+        urllib.request.Request(
+            "https://httpbin.org/get",
+            headers={"Cookie": "bar=baz"},
+        ),
+        "curl -b bar=baz https://httpbin.org/get",
+        id="COOKIE",
+    ),
+    pytest.param(
+        # no method given: urllib infers POST for a request carrying data
+        urllib.request.Request(
+            "https://httpbin.org/post",
+            data=b"foo",
+        ),
+        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        id="TEXT",
+    ),
+    pytest.param(
+        urllib.request.Request(
+            "https://httpbin.org/post",
+            data=b"\xff\xfe\x81binary",
+        ),
+        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        id="BINARY",
+    ),
+    pytest.param(
+        urllib.request.Request(
+            "https://httpbin.org/delete",
+            method="DELETE",
+        ),
+        "curl -X DELETE https://httpbin.org/delete",
+        id="EXPLICIT METHOD",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "req, expected",
+    _URLLIB_PARAMS,
+)
+def test_urllib_to_curl(
+    req: urllib.request.Request,
+    expected: str,
+) -> None:
+    results = to_curl(req)
+    assert results == expected, results
+
+
+def test_urllib_streaming_body_is_dropped() -> None:
+    # urllib accepts an iterable body too; it has no textual form a shell could
+    # run, so the command carries no -d while the method is still inferred POST
+    req = urllib.request.Request("https://httpbin.org/post", data=iter([b"chunk"]))
+    assert to_curl(req) == "curl -X POST https://httpbin.org/post"
+
+
+def test_urllib_unredirected_headers_are_rendered() -> None:
+    # the urlopen machinery stores Content-Type and friends as unredirected
+    # headers, kept apart from the plain header dict; header_items() merges both
+    req = urllib.request.Request("https://httpbin.org/post", data=b"foo")
+    req.add_unredirected_header("Content-Type", "text/plain")
+    assert to_curl(req) == "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post"
+
+
 def test_request_data_registries() -> None:
     # _utils registers every adapter under suppress(ImportError), so a broken
     # adapter module drops out of the registry silently and only shows up as an
     # unrelated "unknown request object" later. The order is part of the
     # contract too: the first adapter that accepts the request wins.
-    assert list(_REQUEST_DATA_CLASSES) == [RequestsRequest, Httpx2Request, HttpxRequest]
+    assert list(_REQUEST_DATA_CLASSES) == [
+        RequestsRequest,
+        NiquestsRequest,
+        Httpx2Request,
+        HttpxRequest,
+        DjangoRequest,
+        WerkzeugRequest,
+        TornadoRequest,
+        TornadoServerRequest,
+        UrllibRequest,
+    ]
     assert list(_REQUEST_DATA_CLASSES_ASYNC) == [
         AsyncHttpx2Request,
         AsyncHttpxRequest,
         AiohttpServerRequest,
+        AiohttpClientRequest,
         StarletteRequest,
     ]
 

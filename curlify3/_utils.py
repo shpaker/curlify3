@@ -19,6 +19,12 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    from curlify3._req_niquests import NiquestsRequest
+
+    _REQUEST_DATA_CLASSES.append(NiquestsRequest)
+
+
+with suppress(ImportError):
     from curlify3._req_httpx2 import Httpx2Request
 
     _REQUEST_DATA_CLASSES.append(Httpx2Request)
@@ -49,9 +55,47 @@ with suppress(ImportError):
 
 
 with suppress(ImportError):
+    from curlify3._req_aiohttp import AiohttpClientRequest
+
+    _REQUEST_DATA_CLASSES_ASYNC.append(AiohttpClientRequest)
+
+
+with suppress(ImportError):
     from curlify3._req_starlette import StarletteRequest
 
     _REQUEST_DATA_CLASSES_ASYNC.append(StarletteRequest)
+
+
+with suppress(ImportError):
+    from curlify3._req_django import DjangoRequest
+
+    _REQUEST_DATA_CLASSES.append(DjangoRequest)
+
+
+with suppress(ImportError):
+    from curlify3._req_werkzeug import WerkzeugRequest
+
+    _REQUEST_DATA_CLASSES.append(WerkzeugRequest)
+
+
+with suppress(ImportError):
+    from curlify3._req_tornado import TornadoRequest
+
+    _REQUEST_DATA_CLASSES.append(TornadoRequest)
+
+
+with suppress(ImportError):
+    from curlify3._req_tornado import TornadoServerRequest
+
+    _REQUEST_DATA_CLASSES.append(TornadoServerRequest)
+
+
+# stdlib, so the import cannot fail and the adapter is always registered; it
+# stays last so the third-party adapters are tried first
+with suppress(ImportError):
+    from curlify3._req_urllib import UrllibRequest
+
+    _REQUEST_DATA_CLASSES.append(UrllibRequest)
 
 
 _DataT = TypeVar("_DataT")
