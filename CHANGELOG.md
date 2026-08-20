@@ -2,12 +2,23 @@
 
 ## Unreleased
 
+### Added
+- Six new packages, seven new adapters. Still zero runtime dependencies: every adapter registers only when its library is importable.
+  - `niquests` — `PreparedRequest`, sync. A self-contained copy of the `requests` adapter (the httpx2 precedent: a fork can diverge, the copy keeps that isolated). HTTP/2 and HTTP/3 are negotiated on the transport, so the command carries no `--http2`.
+  - `urllib.request` (stdlib) — `Request`, sync. An absent method renders the one urllib would send (`POST` with `data`, `GET` otherwise), headers are merged from both the plain header dict and the unredirected ones, and a streaming body renders without `-d`.
+  - `aiohttp` client-side — `ClientRequest`, async, reachable in client middlewares (aiohttp 3.12+). The body is read without being consumed via `Payload.as_bytes()` (aiohttp 3.12.1+): in-memory payloads hand back their value, file payloads seek back, async iterables are cached and replayed at send time; on older aiohttp only in-memory payloads are read and everything else renders without `-d`, because reading it would corrupt the outgoing request.
+  - `django` — `HttpRequest`, sync (the framework buffers the body before the view runs), covering `WSGIRequest` and `ASGIRequest`. The absolute url comes from `build_absolute_uri()`; a stream consumed without buffering (multipart parsing, `request.read()`) raises `RawPostDataException` inside Django, and the command then carries the headers but no `-d`.
+  - `flask` / `werkzeug` — `werkzeug.wrappers.Request`, sync. Covers Flask through its Werkzeug base, the way the starlette adapter covers FastAPI; the body is read with `get_data(cache=True, parse_form_data=False)`, so form parsing after rendering still works.
+  - `tornado` — client `httpclient.HTTPRequest` and server `httputil.HTTPServerRequest`, both sync. The server url comes from `full_url()`.
+
 ### Fixed
 - A body or a multipart field value that starts with `@` — or `<` for a field value — no longer makes the rendered command read a **local file** and send it to the url the request was rendered for. `curl` reads those leading characters as the name of a file to load the value from, so `-d '@/etc/passwd'` sent the file rather than the body. Such a value is now rendered with the option that takes it literally, `--data-raw` or `--form-string`; a file *part* keeps `-F 'field=@file'`, where the `@` is the intended meaning. Reachable from the wire through the server-side adapters, where the value is the caller's to choose, and verified end-to-end against a real file.
 - A multipart field carrying a value that is not valid UTF-8 no longer raises `UnicodeDecodeError`. Part names, field values and filenames are rendered through the same ANSI-C quoting a body that did not decode uses (`-F $'blob=caf\xe9'`), and `shell="powershell"` refuses them the way it already refuses a raw body.
 - A multipart field value containing a newline was truncated at it. The value was matched as a single line, so the command silently sent a prefix of what the request carried. The parts are split on the boundary from `Content-Type` now instead, which also means they are rendered in the order the body carries them — the two patterns this replaced ran one after the other, so every plain field came out before every file part whatever order the body put them in. A `multipart` content-type with no `boundary` parameter leaves nothing to take the body apart with and renders without `-F`.
 - A single-character multipart field name was dropped from the command without a word: both part patterns required two characters of a name, so `-F 'a=1'` never appeared and the command silently sent less than the request did.
 - A NUL byte in a multipart field value is rejected like one in a body. The multipart branch was exempt from the check on the grounds that it renders only names and filenames, which was not true of a plain field's value — the argument would have been truncated at the NUL and the command would have run, sending something other than the request.
+- A `Cookie` header held in a case-sensitive container was silently dropped: the cookie extraction looked the header up case-insensitively, which not every wrapped container supports — tornado's client request keeps whatever plain dict it was handed — so the value reached neither `-b` nor `-H`. The extraction now scans the lowercased header names.
+- An empty `Cookie` header no longer renders as `-H 'cookie: '`. It carries no cookies, and `-b` correctly stayed silent, but the header itself leaked through; django's `RequestFactory` puts one on every request it builds, which is how it surfaced.
 
 ## 0.11 (2026-08-17)
 
