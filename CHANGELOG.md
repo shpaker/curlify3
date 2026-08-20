@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12 (2026-08-20)
 
 ### Added
 - Six new packages, seven new adapters. Still zero runtime dependencies: every adapter registers only when its library is importable.
