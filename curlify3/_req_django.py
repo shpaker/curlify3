@@ -1,3 +1,16 @@
+"""Adapter for django.http.HttpRequest.
+
+Django buffers the body before the view runs, so the sync to_curl() is enough —
+including inside async views. If the stream was consumed without buffering
+(multipart parsing, request.read()), the command carries the headers but no -d.
+
+    from django.http import JsonResponse
+    from curlify3 import to_curl
+
+    def echo(request):
+        return JsonResponse({"curl": to_curl(request)})
+"""
+
 from typing import Any
 
 from django.http import HttpRequest
@@ -9,8 +22,7 @@ from curlify3._types import Body
 
 # HttpRequest falls outside the RawRequest protocol — the absolute url is
 # assembled by build_absolute_uri(), not held in a url attribute — so the type
-# parameter stays Any and url is overridden. The body is buffered by the
-# framework before the view runs, which is what makes this adapter sync
+# parameter stays Any and url is overridden
 class DjangoRequest(BaseRequestData[Any]):
     _instance_of = HttpRequest
 

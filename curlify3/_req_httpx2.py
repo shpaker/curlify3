@@ -1,3 +1,15 @@
+"""Adapters for httpx2.Request, sync and async.
+
+The generated command includes --http2:
+
+    import httpx2
+    from curlify3 import to_curl
+
+    req = httpx2.Request("GET", "https://httpbin.org/get")
+    print(to_curl(req))
+    # curl --http2 -H 'host: httpbin.org' https://httpbin.org/get
+"""
+
 import httpx2
 
 from curlify3._base import AsyncBaseRequestData, BaseRequestData

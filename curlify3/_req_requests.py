@@ -1,3 +1,19 @@
+"""Adapter for requests.PreparedRequest.
+
+    import requests
+    from curlify3 import to_curl
+
+    req = requests.Request(
+        "POST",
+        "https://httpbin.org/post",
+        json={"hello": "world"},
+    ).prepare()
+
+    print(to_curl(req))
+
+A sent request is reachable as response.request.
+"""
+
 import requests
 
 from curlify3._base import BaseRequestData

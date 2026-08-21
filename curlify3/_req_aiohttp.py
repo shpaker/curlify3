@@ -1,3 +1,31 @@
+"""Adapters for aiohttp: the incoming web.Request and the outgoing ClientRequest.
+
+Server-side, inside a handler — async, the body is read from the stream:
+
+    from aiohttp import web
+    from curlify3 import to_curl_async
+
+    async def handler(request: web.Request) -> web.Response:
+        print(await to_curl_async(request))
+        return web.json_response({"ok": True})
+
+Client-side, in a client middleware (aiohttp 3.12+), where the outgoing request
+is reachable. Rendering does not consume the payload — in-memory bodies hand back
+their value, files seek back, and async iterables are cached and replayed when
+the request is sent (that non-consuming read needs aiohttp 3.12.1+; below it,
+streaming bodies render without -d):
+
+    import aiohttp
+    from curlify3 import to_curl_async
+
+    async def log_as_curl(request, handler):
+        print(await to_curl_async(request))
+        return await handler(request)
+
+    async with aiohttp.ClientSession(middlewares=(log_as_curl,)) as session:
+        await session.post("https://httpbin.org/post", json={"hello": "world"})
+"""
+
 from aiohttp import ClientRequest, Payload, web
 
 from curlify3._base import AsyncBaseRequestData
@@ -42,8 +70,6 @@ async def _payload_bytes(
     return raw if isinstance(raw, bytes) else bytes(raw)
 
 
-# the client-side request, reachable in client middlewares (aiohttp >= 3.12):
-# ClientSession(middlewares=(mw,)) with async def mw(request, handler)
 class AiohttpClientRequest(AsyncBaseRequestData[ClientRequest]):
     _instance_of = ClientRequest
 

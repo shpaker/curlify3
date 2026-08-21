@@ -1,3 +1,21 @@
+"""Adapter for urllib.request.Request — stdlib, no third-party client required.
+
+A request without an explicit method renders the one urllib would send: POST
+when it carries data, GET otherwise.
+
+    import urllib.request
+    from curlify3 import to_curl
+
+    req = urllib.request.Request(
+        "https://httpbin.org/post",
+        data=b'{"hello": "world"}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    print(to_curl(req))
+    # curl -X POST -H 'content-type: application/json' -d '{"hello": "world"}' https://httpbin.org/post
+"""
+
 from typing import Any
 from urllib.request import Request
 

@@ -1,3 +1,16 @@
+"""Adapters for httpx.Request, sync and async.
+
+    import httpx
+    from curlify3 import to_curl
+
+    req = httpx.Request("POST", "https://httpbin.org/post", json={"hello": "world"})
+    print(to_curl(req))
+
+The async entrypoint takes the same object, from async code:
+
+    print(await to_curl_async(req))
+"""
+
 import httpx
 
 from curlify3._base import AsyncBaseRequestData, BaseRequestData
