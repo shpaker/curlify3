@@ -35,9 +35,12 @@ import requests
 from curlify3 import to_curl
 
 response = requests.get("https://httpbin.org/get")
-print(to_curl(response.request))
-# curl -H 'user-agent: python-requests/2.32.3' -H 'accept-encoding: gzip, deflate' \
-#      -H 'accept: */*' -H 'connection: keep-alive' https://httpbin.org/get
+print(to_curl(response.request, pretty=True))
+# curl https://httpbin.org/get \
+#   -H 'user-agent: python-requests/2.34.2' \
+#   -H 'accept-encoding: gzip, deflate' \
+#   -H 'accept: */*' \
+#   -H 'connection: keep-alive'
 ```
 
 ## Usage
