@@ -1,3 +1,29 @@
+"""Adapters for tornado: the client HTTPRequest and the server HTTPServerRequest.
+
+Client-side:
+
+    import tornado.httpclient
+    from curlify3 import to_curl
+
+    req = tornado.httpclient.HTTPRequest(
+        "https://httpbin.org/post",
+        method="POST",
+        body='{"hello": "world"}',
+    )
+
+    print(to_curl(req))
+
+Server-side, the framework reads the body before the handler runs, so the
+incoming request renders synchronously:
+
+    import tornado.web
+    from curlify3 import to_curl
+
+    class EchoHandler(tornado.web.RequestHandler):
+        def post(self):
+            self.write({"curl": to_curl(self.request)})
+"""
+
 from typing import Any
 
 from tornado.httpclient import HTTPRequest

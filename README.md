@@ -1,18 +1,18 @@
 # curlify3
 
-Convert request objects from popular Python HTTP libraries into ready-to-run `curl` commands.
-
 [![PyPI](https://img.shields.io/pypi/v/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
 [![Downloads](https://img.shields.io/pypi/dm/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
 [![Python](https://img.shields.io/pypi/pyversions/curlify3.svg)](https://pypi.python.org/pypi/curlify3)
 [![Tests](https://github.com/shpaker/curlify3/actions/workflows/tests.yml/badge.svg)](https://github.com/shpaker/curlify3/actions/workflows/tests.yml)
 
+Convert request objects from popular Python HTTP libraries into ready-to-run `curl` commands.
+
 `curlify3` takes a request object from any supported client or server framework and renders it as an equivalent `curl` command — useful for logging, debugging, sharing reproductions, and copy-pasting from your IDE into a terminal.
 
 ## Features
 
-- Single dispatch entrypoint — `to_curl()` (sync) and `to_curl_async()` (async)
-- Works with **client-side** requests (`requests`, `niquests`, `httpx`, `httpx2`, `aiohttp`, `tornado`, stdlib `urllib.request`) and **server-side** incoming requests (`aiohttp.web`, `starlette` / `fastapi`, `django`, `flask` / `werkzeug`, `tornado`)
+- One entrypoint for everything — `to_curl()` (sync) and `to_curl_async()` (async), dispatching on the type of the request object
+- Works with **client-side** requests (`requests`, `niquests`, `httpx`, `httpx2`, `aiohttp`, `tornado`, stdlib `urllib.request`) and **server-side** incoming requests (`starlette` / `fastapi`, `aiohttp.web`, `django`, `flask` / `werkzeug`, `tornado`)
 - Faithful rendering of headers, query parameters, cookies (`-b`), and bodies, quoted so the command survives the shell even when the values came from an untrusted client
 - Body payloads: text, JSON, form-encoded, multipart, binary
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
@@ -28,25 +28,6 @@ pip install curlify3
 
 Requires **Python 3.10+**.
 
-## Comparison with `curlify` and `curlify2`
-
-| | [`curlify`](https://pypi.org/project/curlify/) | [`curlify2`](https://pypi.org/project/curlify2/) | **`curlify3`** |
-| --- | :---: | :---: | :---: |
-| `requests` | ✅ | ✅ | ✅ |
-| `httpx` | ❌ | ✅ | ✅ |
-| `httpx2` (HTTP/2) | ❌ | ❌ | ✅ |
-| `niquests` | ❌ | ❌ | ✅ |
-| `urllib.request` (stdlib) | ❌ | ❌ | ✅ |
-| `aiohttp` (client and server) | ❌ | ❌ | ✅ |
-| `tornado` (client and server) | ❌ | ❌ | ✅ |
-| `starlette` / `fastapi` (server-side) | ❌ | ❌ | ✅ |
-| `django` (server-side) | ❌ | ❌ | ✅ |
-| `flask` / `werkzeug` (server-side) | ❌ | ❌ | ✅ |
-| Async API | ❌ | ❌ | ✅ |
-| Python | 3.7+ | 3.7–3.11 | 3.10+ |
-
-`curlify` is the original and covers only `requests`. `curlify2` added `httpx` but is sync-only, client-side-only, and has not seen a release since 2023. `curlify3` extends the same idea across the ecosystem: HTTP/2 (`httpx2`), an async entrypoint, the rest of the popular clients down to the stdlib's `urllib.request`, and server-side adapters for `aiohttp`, `starlette` / `fastapi`, `django`, `flask` / `werkzeug` and `tornado` so you can dump incoming requests as `curl` from inside a handler.
-
 ## Quick start
 
 ```python
@@ -54,116 +35,51 @@ import requests
 from curlify3 import to_curl
 
 response = requests.get("https://httpbin.org/get")
-print(to_curl(response.request))
-# curl -H 'user-agent: python-requests/2.32.3' -H 'accept-encoding: gzip, deflate' \
-#      -H 'accept: */*' -H 'connection: keep-alive' https://httpbin.org/get
+print(to_curl(response.request, pretty=True))
+# curl https://httpbin.org/get \
+#   -H 'user-agent: python-requests/2.34.2' \
+#   -H 'accept-encoding: gzip, deflate' \
+#   -H 'accept: */*' \
+#   -H 'connection: keep-alive'
 ```
 
 ## Usage
 
-### `requests`
+Every supported request object goes through the same two calls — `to_curl(request)` when the body is already in memory, `to_curl_async(request)` when it has to be `await`-ed. [Supported request objects](#supported-request-objects) lists which call fits which type, and the docstring of each adapter module (`curlify3/_req_*.py`) carries a usage example for its library.
+
+### Logging middleware (`fastapi`)
+
+On the server side, the same call turns into a one-function logging middleware that records every incoming request as a command ready to be replayed:
 
 ```python
-import requests
-from curlify3 import to_curl
+import logging
 
-req = requests.Request(
-    "POST",
-    "https://httpbin.org/post",
-    json={"hello": "world"},
-).prepare()
-
-print(to_curl(req))
-```
-
-### `niquests`
-
-The prepared request mirrors `requests`, and so does the call. HTTP/2 and HTTP/3 are negotiated on the transport, so the command carries no `--http2`.
-
-```python
-import niquests
-from curlify3 import to_curl
-
-req = niquests.Request(
-    "POST",
-    "https://httpbin.org/post",
-    json={"hello": "world"},
-).prepare()
-
-print(to_curl(req))
-```
-
-### `httpx` (sync)
-
-```python
-import httpx
-from curlify3 import to_curl
-
-req = httpx.Request("POST", "https://httpbin.org/post", json={"hello": "world"})
-print(to_curl(req))
-```
-
-### `httpx` (async)
-
-```python
-import asyncio
-import httpx
+from fastapi import FastAPI, Request
 from curlify3 import to_curl_async
 
-async def main():
-    req = httpx.Request("POST", "https://httpbin.org/post", json={"a": 1})
-    print(await to_curl_async(req))
+logger = logging.getLogger("app.requests")
 
-asyncio.run(main())
+app = FastAPI()
+
+@app.middleware("http")
+async def log_request_as_curl(request: Request, call_next):
+    # Reading the body in a middleware is safe here: starlette caches what
+    # to_curl_async() consumed and replays it, so the route handler still
+    # receives the full body (starlette >= 0.28).
+    curl = await to_curl_async(request)
+    # Log before handing over to the handler, so the command is captured
+    # even for requests the handler then fails on — the ones worth replaying.
+    logger.info("incoming request: %s", curl)
+    return await call_next(request)
 ```
 
-### `httpx2` — HTTP/2
+A `POST` with a JSON body arrives in the log as:
 
-The generated command includes `--http2`.
-
-```python
-import httpx2
-from curlify3 import to_curl
-
-req = httpx2.Request("GET", "https://httpbin.org/get")
-print(to_curl(req))
-# curl --http2 -H 'host: httpbin.org' https://httpbin.org/get
+```
+incoming request: curl -X POST -H 'host: api.example.com' -H 'accept: */*' -H 'content-type: application/json' -d '{"item":"book","qty":2}' http://api.example.com/orders
 ```
 
-`to_curl_async()` works with `httpx2.Request` too.
-
-### `urllib.request` — stdlib
-
-No third-party client required. A request without an explicit `method` renders the one urllib would send: `POST` when it carries `data`, `GET` otherwise.
-
-```python
-import urllib.request
-from curlify3 import to_curl
-
-req = urllib.request.Request(
-    "https://httpbin.org/post",
-    data=b'{"hello": "world"}',
-    headers={"Content-Type": "application/json"},
-)
-
-print(to_curl(req))
-# curl -X POST -H 'content-type: application/json' -d '{"hello": "world"}' https://httpbin.org/post
-```
-
-### `tornado` — client-side
-
-```python
-import tornado.httpclient
-from curlify3 import to_curl
-
-req = tornado.httpclient.HTTPRequest(
-    "https://httpbin.org/post",
-    method="POST",
-    body='{"hello": "world"}',
-)
-
-print(to_curl(req))
-```
+Every value in that command was chosen by the client; [Quoting and untrusted values](#quoting-and-untrusted-values) is what makes it safe to paste anyway.
 
 ### Readable output
 
@@ -190,18 +106,6 @@ The url moves to the first line, where `curl` reads it just as well as in the tr
 
 `pretty=True` is rejected with a `ValueError` for `shell="powershell"`: the `--%` token that dialect relies on is effective only until the next newline, and a backtick cannot extend it, so a multi-line command would be passed to `curl.exe` in pieces.
 
-### Quoting, and untrusted values
-
-Every rendered value is quoted for the target shell, so a body, header, cookie or url is data and never becomes part of the command. This matters most for the server-side adapters, where all of those arrive from the client:
-
-```python
-# an incoming request whose path and cookie were chosen by the caller
-print(await to_curl_async(request))
-# curl -b 'n=O'\''Brien' -H 'host: example.com' 'http://example.com/x;id'
-```
-
-The url and the cookie header are left bare when every character in them is safe, which is the common case and keeps the command short. Anything else is quoted — including the `?` of a single-parameter query string, which `zsh` would otherwise reject as an unmatched glob.
-
 ### Windows PowerShell
 
 By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get one that pastes into Windows PowerShell 5.1.
@@ -227,93 +131,17 @@ print(to_curl(req, shell="powershell"))
 
 The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
 
-### `aiohttp` — client-side
+### Quoting and untrusted values
 
-Client middlewares (aiohttp 3.12+) are where an outgoing `aiohttp.ClientRequest` is reachable. Rendering the command does not consume the payload — in-memory bodies hand back their value, files seek back, and async iterables are cached and replayed when the request is sent (that non-consuming read needs aiohttp 3.12.1+; below it, streaming bodies render without `-d`).
-
-```python
-import asyncio
-import aiohttp
-from curlify3 import to_curl_async
-
-async def log_as_curl(request, handler):
-    print(await to_curl_async(request))
-    return await handler(request)
-
-async def main():
-    async with aiohttp.ClientSession(middlewares=(log_as_curl,)) as session:
-        await session.post("https://httpbin.org/post", json={"hello": "world"})
-
-asyncio.run(main())
-```
-
-### `aiohttp` — server-side
-
-Render an incoming request inside a handler. The async variant is required because the body is read from the stream.
+Every rendered value is quoted for the target shell, so a body, header, cookie or url is data and never becomes part of the command. This matters most for the server-side adapters, where all of those arrive from the client:
 
 ```python
-from aiohttp import web
-from curlify3 import to_curl_async
-
-async def handler(request: web.Request) -> web.Response:
-    curl = await to_curl_async(request)
-    print(curl)
-    return web.json_response({"ok": True})
+# an incoming request whose path and cookie were chosen by the caller
+print(await to_curl_async(request))
+# curl -b 'n=O'\''Brien' -H 'host: example.com' 'http://example.com/x;id'
 ```
 
-### `starlette` / `fastapi` — server-side
-
-```python
-from fastapi import FastAPI, Request
-from curlify3 import to_curl_async
-
-app = FastAPI()
-
-@app.post("/echo")
-async def echo(request: Request):
-    curl = await to_curl_async(request)
-    return {"curl": curl}
-```
-
-### `django` — server-side
-
-Django buffers the body before the view runs, so the sync `to_curl()` is enough — including inside async views. If the stream was consumed without buffering (multipart parsing, `request.read()`), the command carries the headers but no `-d`.
-
-```python
-from django.http import JsonResponse
-from curlify3 import to_curl
-
-def echo(request):
-    return JsonResponse({"curl": to_curl(request)})
-```
-
-### `flask` / `werkzeug` — server-side
-
-The adapter targets `werkzeug.wrappers.Request`, which covers Flask through its Werkzeug base — plain Werkzeug apps work the same way.
-
-```python
-import flask
-from curlify3 import to_curl
-
-app = flask.Flask(__name__)
-
-@app.post("/echo")
-def echo():
-    return {"curl": to_curl(flask.request)}
-```
-
-### `tornado` — server-side
-
-The framework reads the body before the handler runs, so the incoming request renders synchronously.
-
-```python
-import tornado.web
-from curlify3 import to_curl
-
-class EchoHandler(tornado.web.RequestHandler):
-    def post(self):
-        self.write({"curl": to_curl(self.request)})
-```
+The url and the cookie header are left bare when every character in them is safe, which is the common case and keeps the command short. Anything else is quoted — including the `?` of a single-parameter query string, which `zsh` would otherwise reject as an unmatched glob.
 
 ## API
 
@@ -340,7 +168,7 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method is inferred the way urllib sends it |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
 | `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
-| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream |
+| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it |
 | `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d` |
 | `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base |
 | `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side |
@@ -377,6 +205,25 @@ print(to_curl(httpx.Request("POST", "https://example.com/", content="@/etc/passw
 ```
 
 This matters most on the server side, where the value is chosen by whoever sent the request: with `-d`, a command rendered into a log and later pasted into a terminal would read a local file of the caller's choosing and send it to the caller's own url. File *parts* keep `-F 'field=@file'`, where the `@` is the intended meaning.
+
+## Comparison with `curlify` and `curlify2`
+
+| | [`curlify`](https://pypi.org/project/curlify/) | [`curlify2`](https://pypi.org/project/curlify2/) | **`curlify3`** |
+| --- | :---: | :---: | :---: |
+| `requests` | ✅ | ✅ | ✅ |
+| `httpx` | ❌ | ✅ | ✅ |
+| `httpx2` (HTTP/2) | ❌ | ❌ | ✅ |
+| `niquests` | ❌ | ❌ | ✅ |
+| `urllib.request` (stdlib) | ❌ | ❌ | ✅ |
+| `aiohttp` (client and server) | ❌ | ❌ | ✅ |
+| `tornado` (client and server) | ❌ | ❌ | ✅ |
+| `starlette` / `fastapi` (server-side) | ❌ | ❌ | ✅ |
+| `django` (server-side) | ❌ | ❌ | ✅ |
+| `flask` / `werkzeug` (server-side) | ❌ | ❌ | ✅ |
+| Async API | ❌ | ❌ | ✅ |
+| Python | 3.7+ | 3.7–3.11 | 3.10+ |
+
+`curlify` is the original and covers only `requests`. `curlify2` added `httpx` but is sync-only, client-side-only, and has not seen a release since 2023. `curlify3` extends the same idea across the ecosystem: HTTP/2 (`httpx2`), an async entrypoint, the rest of the popular clients down to the stdlib's `urllib.request`, and server-side adapters for `aiohttp`, `starlette` / `fastapi`, `django`, `flask` / `werkzeug` and `tornado` so you can dump incoming requests as `curl` from inside a handler.
 
 ## Development
 

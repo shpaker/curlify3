@@ -316,6 +316,24 @@ def to_curl(
     pretty: bool = False,
     long_options: bool = False,
 ) -> str:
+    """Render a request object as a curl command.
+
+    Accepts the synchronous client-side request types (requests.PreparedRequest,
+    niquests.PreparedRequest, httpx.Request, httpx2.Request, urllib.request.Request,
+    tornado.httpclient.HTTPRequest) and the server-side requests whose body the
+    framework has already buffered (django.http.HttpRequest, werkzeug.wrappers.Request
+    / flask.Request, tornado.httputil.HTTPServerRequest).
+
+    shell selects the output dialect: "sh" (default, POSIX shells) or "powershell"
+    (Windows PowerShell 5.1). pretty breaks the command across lines, long_options
+    spells the options out (--header instead of -H); both default to False, which
+    keeps the output on a single line with short options.
+
+    Raises ValueError if the request type or the shell value is not recognized, if
+    pretty=True is combined with shell="powershell", if the body — or a multipart
+    field value — is not valid UTF-8 and shell="powershell", or if either contains
+    a NUL byte.
+    """
     data = make_request_obj(request)
     return make_curl_string(
         method=data.method,
@@ -336,6 +354,23 @@ async def to_curl_async(
     pretty: bool = False,
     long_options: bool = False,
 ) -> str:
+    """Render a request object as a curl command, awaiting the body.
+
+    Accepts the request types whose body must be awaited — the server-side
+    aiohttp.web.Request and starlette.requests.Request (which covers FastAPI), the
+    client-side aiohttp.ClientRequest — plus httpx.Request / httpx2.Request through
+    the async pathway.
+
+    shell selects the output dialect: "sh" (default, POSIX shells) or "powershell"
+    (Windows PowerShell 5.1). pretty breaks the command across lines, long_options
+    spells the options out (--header instead of -H); both default to False, which
+    keeps the output on a single line with short options.
+
+    Raises ValueError if the request type or the shell value is not recognized, if
+    pretty=True is combined with shell="powershell", if the body — or a multipart
+    field value — is not valid UTF-8 and shell="powershell", or if either contains
+    a NUL byte.
+    """
     data = make_request_obj_async(request)
     return make_curl_string(
         method=data.method,
