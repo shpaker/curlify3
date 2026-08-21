@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13 (2026-08-21)
+
+### Added
+- Docstrings across the package: every adapter module carries a usage example for its library, and `to_curl()` / `to_curl_async()` document the accepted types, the options and the `ValueError` contract in matching terms.
+- A FastAPI logging-middleware example in the README — reading the body in a middleware is safe there, starlette 0.28+ caches what the render consumed and replays it to the route handler.
+
+### Changed
+- The README is reorganized: the per-framework examples moved into the adapter docstrings, the quick start renders with `pretty=True`, and the comparison table moved after the reference sections.
+
 ## 0.12 (2026-08-20)
 
 ### Added
