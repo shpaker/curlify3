@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14 (2026-10-16)
 
 ### Added
 - `include_headers` / `exclude_headers` on `to_curl()` and `to_curl_async()` filter the rendered headers by name, case-insensitively ([#30](https://github.com/shpaker/curlify3/issues/30)). `include_headers` narrows first and `exclude_headers` subtracts from what is left. `Cookie` counts as a header, so dropping it drops `-b` too. Only the printed arguments change: leaving out `content-type` still renders a multipart body as `-F` parts. They are per-call arguments rather than module-level state, so a filter set in one place cannot change what other callers in the same process render. A bare `str`, or a name that is not a `str`, raises `TypeError`.
