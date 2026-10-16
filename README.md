@@ -242,7 +242,7 @@ Formatting and linting are handled by [`ruff`](https://docs.astral.sh/ruff/), ty
 
 One convention the tooling cannot enforce on its own: every parameter of a function goes on its own line, which means every parameter list ends with a trailing comma. Write the comma and the formatter keeps the layout.
 
-CI runs the linter and the type checker on every pull request, and the test suite on Python 3.10–3.14. A separate `windows-latest` job runs the end-to-end tests against the real `powershell.exe` 5.1 and `pwsh`, so the PowerShell dialect is verified by the shell it targets rather than by string comparison alone. The POSIX end-to-end tests do the same through `bash`: the generated command is executed and a local server checks the request arrived byte-for-byte.
+CI runs the linter and the type checker on every pull request, and the test suite on Python 3.10–3.15. A separate `windows-latest` job runs the end-to-end tests against the real `powershell.exe` 5.1 and `pwsh`, so the PowerShell dialect is verified by the shell it targets rather than by string comparison alone. The POSIX end-to-end tests do the same through `bash`: the generated command is executed and a local server checks the request arrived byte-for-byte.
 
 ## Changelog
 
