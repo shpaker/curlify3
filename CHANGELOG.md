@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Python 3.15 support: the `Programming Language :: Python :: 3.15` classifier, and 3.15 in the CI test matrix (the Windows end-to-end job now runs on 3.10 and 3.15).
+
 ## 0.13 (2026-08-21)
 
 ### Added
