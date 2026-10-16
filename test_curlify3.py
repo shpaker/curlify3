@@ -1092,6 +1092,102 @@ async def test_httpx_async_to_curl_pretty_long_options() -> None:
     ), results
 
 
+def _filtered_request() -> httpx.Request:
+    return httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"User-Agent": "ua", "Accept": "*/*"},
+        cookies={"bar": "baz"},
+        json={"foo": 1},
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param(
+            {"exclude_headers": ["User-Agent", "HOST"]},
+            "curl -X POST -b bar=baz -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="EXCLUDE CASE-INSENSITIVE",
+        ),
+        pytest.param(
+            {"include_headers": ["content-type", "Accept"]},
+            "curl -X POST -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="INCLUDE KEEPS ORDER, DROPS COOKIE",
+        ),
+        pytest.param(
+            {"include_headers": []},
+            "curl -X POST -d '{\"foo\":1}' https://httpbin.org/post",
+            id="EMPTY INCLUDE",
+        ),
+        pytest.param(
+            {"include_headers": ["accept", "host", "user-agent"], "exclude_headers": ["user-agent"]},
+            "curl -X POST -H 'host: httpbin.org' -H 'accept: */*' -d '{\"foo\":1}' https://httpbin.org/post",
+            id="INCLUDE THEN EXCLUDE",
+        ),
+        pytest.param(
+            {"exclude_headers": ["cookie"]},
+            "curl -X POST -H 'host: httpbin.org' -H 'user-agent: ua' -H 'accept: */*' "
+            "-H 'content-type: application/json' -d '{\"foo\":1}' https://httpbin.org/post",
+            id="EXCLUDE COOKIE",
+        ),
+        pytest.param(
+            {"include_headers": ["Cookie"]},
+            "curl -X POST -b bar=baz -d '{\"foo\":1}' https://httpbin.org/post",
+            id="INCLUDE COOKIE",
+        ),
+    ],
+)
+def test_to_curl_header_filters(
+    kwargs: dict[str, Any],
+    expected: str,
+) -> None:
+    results = to_curl(_filtered_request(), **kwargs)
+    assert results == expected, results
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_header_filters() -> None:
+    results = await to_curl_async(
+        _filtered_request(),
+        include_headers=["accept", "user-agent"],
+        exclude_headers=["user-agent"],
+    )
+    assert results == "curl -X POST -H 'accept: */*' -d '{\"foo\":1}' https://httpbin.org/post", results
+
+
+def test_to_curl_exclude_content_type_keeps_multipart() -> None:
+    # the filter hides the -H line only: the body is still taken apart by its boundary
+    req = httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        data={"field": "value"},
+        files={"upload": ("a.txt", b"hi")},
+    )
+    results = to_curl(req, exclude_headers=["content-type"])
+    assert results == (
+        "curl -X POST -H 'host: httpbin.org' -F 'field=value' -F 'upload=@a.txt' https://httpbin.org/post"
+    ), results
+
+
+def test_to_curl_header_filter_rejects_str() -> None:
+    # a str is an Iterable[str] to the type checker, so only the runtime check catches it
+    with pytest.raises(TypeError, match="include_headers expects an iterable of header names"):
+        to_curl(_filtered_request(), include_headers="accept")
+    with pytest.raises(TypeError, match="exclude_headers expects an iterable of header names"):
+        to_curl(_filtered_request(), exclude_headers="accept")
+
+
+def test_to_curl_header_filter_rejects_non_str_names() -> None:
+    # a bytes name would never match the str header names and filter nothing in silence
+    with pytest.raises(TypeError, match="include_headers expects header names as str, got bytes"):
+        to_curl(_filtered_request(), include_headers=[b"accept"])  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="exclude_headers expects header names as str, got int"):
+        to_curl(_filtered_request(), exclude_headers=[1])  # ty: ignore[invalid-argument-type]
+
+
 def test_to_curl_pretty_powershell() -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get")
     with pytest.raises(ValueError, match="pretty output is not supported"):

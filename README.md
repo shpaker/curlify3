@@ -17,6 +17,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - Body payloads: text, JSON, form-encoded, multipart, binary
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
+- Header filtering per call: `exclude_headers` drops the noise, `include_headers` keeps only what matters
 - Zero runtime dependencies
 - Fully annotated and `py.typed`, so the types reach your own type checker
 
@@ -106,6 +107,30 @@ The url moves to the first line, where `curl` reads it just as well as in the tr
 
 `pretty=True` is rejected with a `ValueError` for `shell="powershell"`: the `--%` token that dialect relies on is effective only until the next newline, and a backtick cannot extend it, so a multi-line command would be passed to `curl.exe` in pieces.
 
+### Filtering headers
+
+`exclude_headers` leaves the named headers out of the command, `include_headers` renders only the named ones. Names match case-insensitively. Handy for logs, where the headers a client adds on its own drown out the ones the request is about:
+
+```python
+import requests
+from curlify3 import to_curl
+
+req = requests.Session().prepare_request(requests.Request(
+    "POST",
+    "https://httpbin.org/post",
+    headers={"Authorization": "Bearer t0ken"},
+    json={"date": "2026-08-10"},
+))
+
+print(to_curl(req, exclude_headers=["user-agent", "accept-encoding", "accept", "connection"]))
+# curl -X POST -H 'authorization: Bearer t0ken' -H 'content-type: application/json' -d '{"date": "2026-08-10"}' https://httpbin.org/post
+
+print(to_curl(req, include_headers=["content-type"]))
+# curl -X POST -H 'content-type: application/json' -d '{"date": "2026-08-10"}' https://httpbin.org/post
+```
+
+The two combine: `include_headers` narrows first and `exclude_headers` subtracts from what is left. `include_headers=[]` renders no headers at all, while the default `None` renders all of them. `Cookie` counts as a header, so a filter that drops it drops `-b` as well. The filter only decides what is printed: leaving out `content-type` hides its `-H` line, but a multipart body is still rendered as `-F` parts. A bare string such as `exclude_headers="accept"` raises `TypeError`, because it would otherwise be read one character at a time.
+
 ### Windows PowerShell
 
 By default the command is formatted for POSIX shells. Pass `shell="powershell"` to get one that pastes into Windows PowerShell 5.1.
@@ -145,17 +170,17 @@ The url and the cookie header are left bare when every character in them is safe
 
 ## API
 
-### `to_curl(request, shell="sh", pretty=False, long_options=False) -> str`
+### `to_curl(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=()) -> str`
 
 Render a request object as a `curl` command. Use for synchronous client-side request types (`requests.PreparedRequest`, `niquests.PreparedRequest`, `httpx.Request`, `httpx2.Request`, `urllib.request.Request`, `tornado.httpclient.HTTPRequest`) and for server-side requests whose body the framework has already buffered (`django.http.HttpRequest`, `werkzeug.wrappers.Request` / `flask.Request`, `tornado.httputil.HTTPServerRequest`).
 
-### `to_curl_async(request, shell="sh", pretty=False, long_options=False) -> str`
+### `to_curl_async(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=()) -> str`
 
 Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.web.Request`, `aiohttp.ClientRequest`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options.
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers).
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte.
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
 
 ## Supported request objects
 
