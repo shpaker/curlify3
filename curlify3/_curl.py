@@ -168,6 +168,11 @@ def _header_names(
     # exclude nothing; the adapters lowercase every header name, so the names are too
     if isinstance(names, str):
         raise TypeError(f"{what} expects an iterable of header names, not a str: {names!r}")
+    names = list(names)
+    # a bytes name would never equal a str header name, so it would match nothing in silence
+    for name in names:
+        if not isinstance(name, str):
+            raise TypeError(f"{what} expects header names as str, got {type(name).__name__}: {name!r}")
     return frozenset(name.lower() for name in names)
 
 
@@ -371,7 +376,7 @@ def to_curl(
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
     a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names.
+    rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj(request)
     return make_curl_string(
@@ -418,7 +423,7 @@ async def to_curl_async(
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
     a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names.
+    rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj_async(request)
     return make_curl_string(

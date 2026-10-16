@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- `include_headers` / `exclude_headers` on `to_curl()` and `to_curl_async()` filter the rendered headers by name, case-insensitively ([#30](https://github.com/shpaker/curlify3/issues/30)). `include_headers` narrows first and `exclude_headers` subtracts from what is left. `Cookie` counts as a header, so dropping it drops `-b` too. Only the printed arguments change: leaving out `content-type` still renders a multipart body as `-F` parts. They are per-call arguments rather than module-level state, so a filter set in one place cannot change what other callers in the same process render. A bare `str` raises `TypeError`.
+- `include_headers` / `exclude_headers` on `to_curl()` and `to_curl_async()` filter the rendered headers by name, case-insensitively ([#30](https://github.com/shpaker/curlify3/issues/30)). `include_headers` narrows first and `exclude_headers` subtracts from what is left. `Cookie` counts as a header, so dropping it drops `-b` too. Only the printed arguments change: leaving out `content-type` still renders a multipart body as `-F` parts. They are per-call arguments rather than module-level state, so a filter set in one place cannot change what other callers in the same process render. A bare `str`, or a name that is not a `str`, raises `TypeError`.
 - Python 3.15 support: the `Programming Language :: Python :: 3.15` classifier, and 3.15 in the CI test matrix (the Windows end-to-end job now runs on 3.10 and 3.15).
 
 ## 0.13 (2026-08-21)

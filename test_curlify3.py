@@ -1180,6 +1180,14 @@ def test_to_curl_header_filter_rejects_str() -> None:
         to_curl(_filtered_request(), exclude_headers="accept")
 
 
+def test_to_curl_header_filter_rejects_non_str_names() -> None:
+    # a bytes name would never match the str header names and filter nothing in silence
+    with pytest.raises(TypeError, match="include_headers expects header names as str, got bytes"):
+        to_curl(_filtered_request(), include_headers=[b"accept"])  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="exclude_headers expects header names as str, got int"):
+        to_curl(_filtered_request(), exclude_headers=[1])  # ty: ignore[invalid-argument-type]
+
+
 def test_to_curl_pretty_powershell() -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get")
     with pytest.raises(ValueError, match="pretty output is not supported"):
