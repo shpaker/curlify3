@@ -128,13 +128,15 @@ def run_and_assert(
     script_path: pathlib.Path,
     runner_args: list[str],
     script_prelude: str = "",
-    # pretty / long_options, forwarded to to_curl
-    **curl_kwargs: bool,
+    pretty: bool = False,
+    long_options: bool = False,
 ) -> None:
     request_kwargs = dict(request_kwargs)
     request_kwargs["url"] = base_url + request_kwargs["url"]
     req = httpx.Request(**request_kwargs)
-    script_path.write_text(script_prelude + to_curl(req, shell=shell, **curl_kwargs), encoding="utf-8")
+    script_path.write_text(
+        script_prelude + to_curl(req, shell=shell, pretty=pretty, long_options=long_options), encoding="utf-8"
+    )
     completed = subprocess.run(
         [*runner_args, str(script_path)],
         capture_output=True,

@@ -1,6 +1,6 @@
 import re
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Final, NamedTuple, TypeAlias
 
 from curlify3._types import Body, Headers
@@ -160,13 +160,36 @@ def reject_nul(
         )
 
 
+def _header_names(
+    names: Iterable[str],
+    what: str,
+) -> frozenset[str]:
+    # a str is an iterable of its characters, so exclude_headers="accept" would quietly
+    # exclude nothing; the adapters lowercase every header name, so the names are too
+    if isinstance(names, str):
+        raise TypeError(f"{what} expects an iterable of header names, not a str: {names!r}")
+    return frozenset(name.lower() for name in names)
+
+
+def make_header_filter(
+    include_headers: Iterable[str] | None,
+    exclude_headers: Iterable[str],
+) -> Callable[[str], bool]:
+    # include narrows first and exclude subtracts from what is left, so passing both is
+    # well-defined; None leaves the allowlist off, while an empty one keeps no header
+    include = None if include_headers is None else _header_names(include_headers, "include_headers")
+    exclude = _header_names(exclude_headers, "exclude_headers")
+    return lambda name: (include is None or name in include) and name not in exclude
+
+
 def make_curl_headers(
     headers: Headers,
     quote: Quote,
     options: Options,
+    keep: Callable[[str], bool],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items()]
+    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items() if keep(header)]
 
 
 def make_curl_cookies(
@@ -280,6 +303,8 @@ def make_curl_string(
     shell: str = SH,
     pretty: bool = False,
     long_options: bool = False,
+    include_headers: Iterable[str] | None = None,
+    exclude_headers: Iterable[str] = (),
 ) -> str:
     if shell not in SHELLS:
         raise ValueError(f"unknown shell: {shell!r}, expected one of {sorted(SHELLS)}")
@@ -291,6 +316,12 @@ def make_curl_string(
     # the other two rejections live in SHELLS, in the quote functions of the dialect that
     # cannot render the value: a NUL byte in any shell, and raw bytes in powershell
     options = LONG_OPTIONS if long_options else SHORT_OPTIONS
+    # the filter decides only what is printed: the body below still reads the headers it
+    # needs, so leaving content-type out hides the -H line but not the multipart parts.
+    # The adapters lift the Cookie header into -b, and the filter follows it there
+    keep = make_header_filter(include_headers, exclude_headers)
+    if not keep("cookie"):
+        cookies = None
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
@@ -299,7 +330,7 @@ def make_curl_string(
         "--http2" if http2 else None,
         f"{options['request']} {method}" if method != "GET" else None,
         *make_curl_cookies(cookies, shell_conf.quote_word, options),
-        *make_curl_headers(headers, shell_conf.quote, options),
+        *make_curl_headers(headers, shell_conf.quote, options, keep),
         *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
     ]
     parts = [str(entity) for entity in args if entity]
@@ -315,6 +346,8 @@ def to_curl(
     shell: str = SH,
     pretty: bool = False,
     long_options: bool = False,
+    include_headers: Iterable[str] | None = None,
+    exclude_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command.
 
@@ -329,10 +362,16 @@ def to_curl(
     spells the options out (--header instead of -H); both default to False, which
     keeps the output on a single line with short options.
 
+    include_headers renders only the named headers, exclude_headers leaves the named
+    ones out; names are matched case-insensitively, include applies first and
+    exclude then subtracts from what is left. Cookie counts as a header, so a
+    filter that drops it drops -b too. Both default to rendering every header.
+
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte.
+    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
+    rather than an iterable of names.
     """
     data = make_request_obj(request)
     return make_curl_string(
@@ -345,6 +384,8 @@ def to_curl(
         shell=shell,
         pretty=pretty,
         long_options=long_options,
+        include_headers=include_headers,
+        exclude_headers=exclude_headers,
     )
 
 
@@ -353,6 +394,8 @@ async def to_curl_async(
     shell: str = SH,
     pretty: bool = False,
     long_options: bool = False,
+    include_headers: Iterable[str] | None = None,
+    exclude_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command, awaiting the body.
 
@@ -366,10 +409,16 @@ async def to_curl_async(
     spells the options out (--header instead of -H); both default to False, which
     keeps the output on a single line with short options.
 
+    include_headers renders only the named headers, exclude_headers leaves the named
+    ones out; names are matched case-insensitively, include applies first and
+    exclude then subtracts from what is left. Cookie counts as a header, so a
+    filter that drops it drops -b too. Both default to rendering every header.
+
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte.
+    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
+    rather than an iterable of names.
     """
     data = make_request_obj_async(request)
     return make_curl_string(
@@ -382,4 +431,6 @@ async def to_curl_async(
         shell=shell,
         pretty=pretty,
         long_options=long_options,
+        include_headers=include_headers,
+        exclude_headers=exclude_headers,
     )
