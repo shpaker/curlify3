@@ -26,7 +26,7 @@ just fmt     # ruff check --fix, then ruff format
   ```
 
 - Comments explain why, not what — the existing modules are the reference for tone and density.
-- A behavior change comes with a test in `test_curlify3.py`. A change to quoting or to a shell dialect also gets an end-to-end case in `test_shell_e2e.py`, which runs the rendered command in the real shell.
+- A behavior change comes with a test in `test_curlify3.py`. A change to quoting or to a shell dialect also gets an end-to-end case in `test_shell_e2e.py`, which runs the rendered command in the real shell. The pytest plugin and the Robot Framework library have suites of their own, `test_pytest_plugin.py` and `test_robot.py`.
 
 ## Adding an adapter
 
