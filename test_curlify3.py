@@ -1206,43 +1206,43 @@ def _secret_request() -> httpx.Request:
             "curl -X POST -b 'sid=s3cret; theme=dark' -H 'host: httpbin.org' -H 'authorization: Bearer t0ken' "
             "-H 'x-api-key: k3y' -H 'accept: */*' -H 'content-type: application/json' "
             "-d '{\"foo\":1}' https://httpbin.org/post",
-            id="DEFAULT REDACTS NOTHING",
+            id="DEFAULT MASKS NOTHING",
         ),
         pytest.param(
-            {"redact_headers": ["Authorization"]},
+            {"mask_headers": ["Authorization"]},
             "curl -X POST -b 'sid=s3cret; theme=dark' -H 'host: httpbin.org' -H 'authorization: Bearer ***' "
             "-H 'x-api-key: k3y' -H 'accept: */*' -H 'content-type: application/json' "
             "-d '{\"foo\":1}' https://httpbin.org/post",
             id="AUTH KEEPS SCHEME, CASE-INSENSITIVE",
         ),
         pytest.param(
-            {"redact_headers": ["x-api-key", "cookie"]},
+            {"mask_headers": ["x-api-key", "cookie"]},
             "curl -X POST -b 'sid=***; theme=***' -H 'host: httpbin.org' -H 'authorization: Bearer t0ken' "
             "-H 'x-api-key: ***' -H 'accept: */*' -H 'content-type: application/json' "
             "-d '{\"foo\":1}' https://httpbin.org/post",
             id="PLAIN HEADER AND COOKIES PER PAIR",
         ),
         pytest.param(
-            {"redact_headers": SENSITIVE_HEADERS},
+            {"mask_headers": SENSITIVE_HEADERS},
             "curl -X POST -b 'sid=***; theme=***' -H 'host: httpbin.org' -H 'authorization: Bearer ***' "
             "-H 'x-api-key: ***' -H 'accept: */*' -H 'content-type: application/json' "
             "-d '{\"foo\":1}' https://httpbin.org/post",
             id="SENSITIVE HEADERS",
         ),
         pytest.param(
-            {"redact_headers": ["authorization"], "exclude_headers": ["authorization", "cookie"]},
+            {"mask_headers": ["authorization"], "exclude_headers": ["authorization", "cookie"]},
             "curl -X POST -H 'host: httpbin.org' -H 'x-api-key: k3y' -H 'accept: */*' "
             "-H 'content-type: application/json' -d '{\"foo\":1}' https://httpbin.org/post",
-            id="EXCLUDE WINS OVER REDACT",
+            id="EXCLUDE WINS OVER MASK",
         ),
         pytest.param(
-            {"redact_headers": SENSITIVE_HEADERS, "include_headers": ["authorization"]},
+            {"mask_headers": SENSITIVE_HEADERS, "include_headers": ["authorization"]},
             "curl -X POST -H 'authorization: Bearer ***' -d '{\"foo\":1}' https://httpbin.org/post",
-            id="REDACT AFTER INCLUDE",
+            id="MASK AFTER INCLUDE",
         ),
     ],
 )
-def test_to_curl_redact_headers(
+def test_to_curl_mask_headers(
     kwargs: dict[str, Any],
     expected: str,
 ) -> None:
@@ -1259,30 +1259,30 @@ def test_to_curl_redact_headers(
         pytest.param({"X-Auth-Token": "Bearer t0ken"}, "x-auth-token: ***", id="SCHEME ONLY FOR AUTH HEADERS"),
     ],
 )
-def test_to_curl_redact_header_value(
+def test_to_curl_mask_header_value(
     headers: dict[str, str],
     expected: str,
 ) -> None:
     req = httpx.Request(method="GET", url="https://httpbin.org/get", headers=headers)
-    results = to_curl(req, redact_headers=SENSITIVE_HEADERS)
+    results = to_curl(req, mask_headers=SENSITIVE_HEADERS)
     assert results == f"curl -H 'host: httpbin.org' -H '{expected}' https://httpbin.org/get", results
 
 
-def test_to_curl_redact_cookie_without_value() -> None:
+def test_to_curl_mask_cookie_without_value() -> None:
     # a pair with no = has no name to keep, so the whole of it is masked
     req = httpx.Request(method="GET", url="https://httpbin.org/get", headers={"Cookie": "sid=s3cret; flag"})
-    results = to_curl(req, redact_headers=["cookie"])
+    results = to_curl(req, mask_headers=["cookie"])
     assert results == "curl -b 'sid=***; ***' -H 'host: httpbin.org' https://httpbin.org/get", results
 
 
 @pytest.mark.asyncio
-async def test_to_curl_async_redact_headers() -> None:
-    results = await to_curl_async(_secret_request(), redact_headers=SENSITIVE_HEADERS, include_headers=["cookie"])
+async def test_to_curl_async_mask_headers() -> None:
+    results = await to_curl_async(_secret_request(), mask_headers=SENSITIVE_HEADERS, include_headers=["cookie"])
     assert results == "curl -X POST -b 'sid=***; theme=***' -d '{\"foo\":1}' https://httpbin.org/post", results
 
 
-def test_to_curl_redact_headers_powershell() -> None:
-    results = to_curl(_secret_request(), shell=POWERSHELL, redact_headers=SENSITIVE_HEADERS)
+def test_to_curl_mask_headers_powershell() -> None:
+    results = to_curl(_secret_request(), shell=POWERSHELL, mask_headers=SENSITIVE_HEADERS)
     assert results == (
         'curl.exe --% -X POST -b "sid=***; theme=***" -H "host: httpbin.org" -H "authorization: Bearer ***" '
         '-H "x-api-key: ***" -H "accept: */*" -H "content-type: application/json" '
@@ -1290,26 +1290,26 @@ def test_to_curl_redact_headers_powershell() -> None:
     ), results
 
 
-def test_to_curl_redact_content_type_keeps_multipart() -> None:
-    # redaction changes the printed value only: the body is still taken apart by its boundary
+def test_to_curl_mask_content_type_keeps_multipart() -> None:
+    # masking changes the printed value only: the body is still taken apart by its boundary
     req = httpx.Request(
         method="POST",
         url="https://httpbin.org/post",
         data={"field": "value"},
         files={"upload": ("a.txt", b"hi")},
     )
-    results = to_curl(req, redact_headers=["content-type"])
+    results = to_curl(req, mask_headers=["content-type"])
     assert results == (
         "curl -X POST -H 'host: httpbin.org' -H 'content-type: ***' -F 'field=value' -F 'upload=@a.txt' "
         "https://httpbin.org/post"
     ), results
 
 
-def test_to_curl_redact_headers_rejects_bad_names() -> None:
-    with pytest.raises(TypeError, match="redact_headers expects an iterable of header names"):
-        to_curl(_secret_request(), redact_headers="authorization")
-    with pytest.raises(TypeError, match="redact_headers expects header names as str, got bytes"):
-        to_curl(_secret_request(), redact_headers=[b"authorization"])  # ty: ignore[invalid-argument-type]
+def test_to_curl_mask_headers_rejects_bad_names() -> None:
+    with pytest.raises(TypeError, match="mask_headers expects an iterable of header names"):
+        to_curl(_secret_request(), mask_headers="authorization")
+    with pytest.raises(TypeError, match="mask_headers expects header names as str, got bytes"):
+        to_curl(_secret_request(), mask_headers=[b"authorization"])  # ty: ignore[invalid-argument-type]
 
 
 def test_to_curl_pretty_powershell() -> None:
