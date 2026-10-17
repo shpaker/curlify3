@@ -26,17 +26,31 @@ incoming request renders synchronously:
 
 import base64
 
+from collections.abc import Iterable
 from typing import Any
 
 from tornado.httpclient import HTTPRequest
-from tornado.httputil import HTTPServerRequest, encode_username_password
+from tornado.httputil import HTTPHeaders, HTTPServerRequest, encode_username_password
 
 from curlify3._base import BaseRequestData
 from curlify3._types import Body, Headers
 
 
+def _tornado_header_items(
+    headers: Any,  # noqa: ANN401
+) -> Iterable[tuple[Any, Any]]:
+    # HTTPHeaders joins a repeated header with "," in items(), a Cookie included, and keeps
+    # the pairs apart in get_all(); the client request may hold a plain dict instead
+    return headers.get_all() if isinstance(headers, HTTPHeaders) else headers.items()
+
+
 class TornadoRequest(BaseRequestData[HTTPRequest]):
     _instance_of = HTTPRequest
+
+    def _header_items(
+        self,
+    ) -> Iterable[tuple[Any, Any]]:
+        return _tornado_header_items(self._request.headers)
 
     @property
     def headers(
@@ -78,6 +92,11 @@ class TornadoRequest(BaseRequestData[HTTPRequest]):
 # stays Any and url is overridden
 class TornadoServerRequest(BaseRequestData[Any]):
     _instance_of = HTTPServerRequest
+
+    def _header_items(
+        self,
+    ) -> Iterable[tuple[Any, Any]]:
+        return _tornado_header_items(self._request.headers)
 
     @property
     def url(

@@ -104,6 +104,12 @@ _E2E_REQUESTS = [
         id="URL SINGLE PARAM",
     ),
     pytest.param(
+        # curl expands [] and {} in a url unless globbing is off: {x} lost its braces and a
+        # [1-3] range went out as three requests
+        dict(method="GET", url="/get?a[]=1&b={x}&id=[1-3]"),
+        id="URL GLOB CHARACTERS",
+    ),
+    pytest.param(
         # a body makes curl send POST unless the GET is named
         dict(method="GET", url="/get", content=b"abc"),
         id="GET WITH BODY",
