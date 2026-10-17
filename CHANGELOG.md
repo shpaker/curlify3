@@ -5,6 +5,12 @@
 ### Added
 - `mask_headers` on `to_curl()` and `to_curl_async()` keeps the named headers in the command but prints `***` in place of their values, so a rendered command can go to a log without the credentials it carried ([#35](https://github.com/shpaker/curlify3/issues/35)). `authorization` and `proxy-authorization` keep the auth scheme (`Bearer ***`), and a masked `cookie` keeps the name of each cookie in `-b` (`-b 'sid=***; theme=***'`). Names match case-insensitively; the include/exclude filters decide what is printed and masking applies to what is left. The new `SENSITIVE_HEADERS` constant holds the usual credential-carrying names and is what the FastAPI middleware example in the README now passes, together with an `exclude_headers` list that drops the headers every client sends. Opt-in: the default masks nothing, so existing output does not change. Query-string and body secrets are not covered.
 
+### Fixed
+- `shell="powershell"` no longer renders a value holding a line break ([#45](https://github.com/shpaker/curlify3/issues/45)). `--%` is effective only until the end of the line, so the rest of a multi-line body, header or field value ran as PowerShell commands of its own — reachable from the wire through the server-side adapters, where a body such as `x"` + newline + `Get-Date; #` is the caller's to choose. Such a value now raises `ValueError`, like raw bytes already did.
+- A multipart field value that `-F` would parse is rendered with `--form-string` ([#45](https://github.com/shpaker/curlify3/issues/45)). A `;` started an attribute — `;headers=@file` loaded the part headers from a **local file**, `;type=` and `;filename=` changed the part and cut the value short — and a leading `"` opened a quoted string whose tail was dropped. Only a leading `@` or `<` was handled before.
+- A multipart filename holding `;`, `,`, `"` or `\` is written as a quoted string, `-F 'f=@"a;b.txt"'` ([#45](https://github.com/shpaker/curlify3/issues/45)). `-F` cut a bare one at the `;` or read the `,` as a list of files, so the command sent another file or failed.
+- A `Cookie` header without an `=` is rendered as `-H 'cookie: …'` ([#45](https://github.com/shpaker/curlify3/issues/45)). `-b` reads such a value as the name of a cookie file and sent the cookies stored in it.
+
 ## 0.14 (2026-10-16)
 
 ### Added
