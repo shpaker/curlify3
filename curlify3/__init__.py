@@ -10,11 +10,12 @@ Every supported request type goes through to_curl() (sync) or to_curl_async() (a
 the docstring of each curlify3._req_* module carries an example for its library.
 """
 
-from curlify3._curl import POWERSHELL, SH, to_curl, to_curl_async
+from curlify3._curl import POWERSHELL, SENSITIVE_HEADERS, SH, to_curl, to_curl_async
 
 __version__ = "0.1.0"
 __all__ = [
     "POWERSHELL",
+    "SENSITIVE_HEADERS",
     "SH",
     "to_curl",
     "to_curl_async",

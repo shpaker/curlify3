@@ -37,6 +37,23 @@ SH_BYTE_ESCAPES: Final[Mapping[int, str]] = {0x27: "\\'", 0x5C: "\\\\"}
 SH: Final = "sh"
 POWERSHELL: Final = "powershell"
 
+# what a redacted value is replaced with; the header name, the auth scheme and the cookie
+# names stay, so the command still shows what the request carried, just not the secret
+REDACTED: Final = "***"
+# the headers that carry credentials in the common case, for redact_headers=SENSITIVE_HEADERS
+SENSITIVE_HEADERS: Final = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    }
+)
+# their value is "<scheme> <credentials>", and the scheme tells Basic from Bearer
+AUTH_SCHEME_HEADERS: Final = frozenset({"authorization", "proxy-authorization"})
+
 SHORT_OPTIONS: Final[Options] = {
     "request": "-X",
     "header": "-H",
@@ -187,14 +204,41 @@ def make_header_filter(
     return lambda name: (include is None or name in include) and name not in exclude
 
 
+def redact_header_value(
+    name: str,
+    value: str,
+) -> str:
+    if name in AUTH_SCHEME_HEADERS:
+        scheme, separator, _ = value.strip().partition(" ")
+        if separator:
+            return f"{scheme} {REDACTED}"
+    return REDACTED
+
+
+def redact_cookies(
+    cookies: str,
+) -> str:
+    # each pair keeps its name: which cookies a request carried is often the whole question
+    pairs = []
+    for pair in cookies.split(";"):
+        name, separator, _ = pair.strip().partition("=")
+        pairs.append(f"{name}={REDACTED}" if separator else REDACTED)
+    return "; ".join(pairs)
+
+
 def make_curl_headers(
     headers: Headers,
     quote: Quote,
     options: Options,
     keep: Callable[[str], bool],
+    redact: frozenset[str],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items() if keep(header)]
+    return [
+        f"{option} {quote(f'{header}: {redact_header_value(header, value) if header in redact else value}')}"
+        for header, value in headers.items()
+        if keep(header)
+    ]
 
 
 def make_curl_cookies(
@@ -310,6 +354,7 @@ def make_curl_string(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    redact_headers: Iterable[str] = (),
 ) -> str:
     if shell not in SHELLS:
         raise ValueError(f"unknown shell: {shell!r}, expected one of {sorted(SHELLS)}")
@@ -327,6 +372,11 @@ def make_curl_string(
     keep = make_header_filter(include_headers, exclude_headers)
     if not keep("cookie"):
         cookies = None
+    # redaction only changes how a value is printed, the same as the filter: the body
+    # below still reads the real headers
+    redact = _header_names(redact_headers, "redact_headers")
+    if cookies and "cookie" in redact:
+        cookies = redact_cookies(cookies)
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
@@ -335,7 +385,7 @@ def make_curl_string(
         "--http2" if http2 else None,
         f"{options['request']} {method}" if method != "GET" else None,
         *make_curl_cookies(cookies, shell_conf.quote_word, options),
-        *make_curl_headers(headers, shell_conf.quote, options, keep),
+        *make_curl_headers(headers, shell_conf.quote, options, keep, redact),
         *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
     ]
     parts = [str(entity) for entity in args if entity]
@@ -353,6 +403,7 @@ def to_curl(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    redact_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command.
 
@@ -372,11 +423,18 @@ def to_curl(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
+    redact_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    redacted cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to redacting
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    a NUL byte. Raises TypeError if include_headers, exclude_headers or
+    redact_headers is a str rather than an iterable of names, or holds a name that
+    is not a str.
     """
     data = make_request_obj(request)
     return make_curl_string(
@@ -391,6 +449,7 @@ def to_curl(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        redact_headers=redact_headers,
     )
 
 
@@ -401,6 +460,7 @@ async def to_curl_async(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    redact_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command, awaiting the body.
 
@@ -419,11 +479,18 @@ async def to_curl_async(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
+    redact_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    redacted cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to redacting
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    a NUL byte. Raises TypeError if include_headers, exclude_headers or
+    redact_headers is a str rather than an iterable of names, or holds a name that
+    is not a str.
     """
     data = make_request_obj_async(request)
     return make_curl_string(
@@ -438,4 +505,5 @@ async def to_curl_async(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        redact_headers=redact_headers,
     )

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `redact_headers` on `to_curl()` and `to_curl_async()` keeps the named headers in the command but prints `***` in place of their values, so a rendered command can go to a log without the credentials it carried ([#35](https://github.com/shpaker/curlify3/issues/35)). `authorization` and `proxy-authorization` keep the auth scheme (`Bearer ***`), and a redacted `cookie` keeps the name of each cookie in `-b` (`-b 'sid=***; theme=***'`). Names match case-insensitively; the include/exclude filters decide what is printed and redaction then masks what is left. The new `SENSITIVE_HEADERS` constant holds the usual credential-carrying names and is what the FastAPI middleware example in the README now passes. Opt-in: the default redacts nothing, so existing output does not change. Query-string and body secrets are not covered.
+
 ## 0.14 (2026-10-16)
 
 ### Added
