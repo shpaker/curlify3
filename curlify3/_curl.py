@@ -12,9 +12,15 @@ Quote: TypeAlias = Callable[[str], str]
 BytesQuote: TypeAlias = Callable[[bytes], str]
 Options: TypeAlias = Mapping[str, str]
 
-MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?')
-PART_NAME: Final = re.compile(rb'name="([^"]*)"')
-PART_FILENAME: Final = re.compile(rb'filename="([^"]*)"')
+# media type and parameter names are case-insensitive (RFC 9110)
+MULTIPART_FORM: Final = "multipart/form-data"
+MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?', re.IGNORECASE)
+# the parameter with the ; before it: -F makes curl pick a boundary of its own and append
+# it to a content-type header given with -H, so one left in sent two boundary parameters
+MULTIPART_BOUNDARY_PARAM: Final = re.compile(r'\s*;\s*boundary=("[^"]*"|[^;]*)', re.IGNORECASE)
+# anchored on the ; before them: an unanchored name=" also matched inside filename="
+PART_NAME: Final = re.compile(rb';\s*name="([^"]*)"', re.IGNORECASE)
+PART_FILENAME: Final = re.compile(rb';\s*filename="([^"]*)"', re.IGNORECASE)
 
 # curl reads a leading @ in a --data value, and a leading @ or < in a --form value, as
 # "load the value from this file" rather than as the value itself. Such a value has to go
@@ -359,7 +365,11 @@ def make_multipart_curl_args(
         if name is None:
             continue
         filename = PART_FILENAME.search(head)
-        if filename is not None:
+        if filename is not None and not filename.group(1):
+            # what a browser sends for a file input left empty; -F 'name=@' names a file
+            # curl cannot open, and the filename attribute is the one way to keep it a file part
+            part, option = name.group(1) + b'=;filename=""', options["form"]
+        elif filename is not None:
             # here the leading @ is the point: -F is what makes curl send the file the
             # request sent, so a file part is spelled name=@filename
             part, option = name.group(1) + b"=@" + quote_form_filename(filename.group(1)), options["form"]
@@ -371,6 +381,14 @@ def make_multipart_curl_args(
             option = options["form_string"] if is_form_parsed(value) else options["form"]
         body_parts.append(f"{option} {quote_multipart_part(part, quote, quote_bytes)}")
     return body_parts
+
+
+def is_multipart_form(
+    content_type: str,
+) -> bool:
+    # only form-data is what -F builds: the parts of multipart/mixed or multipart/related
+    # carry no field names, and those bodies go out as they are, with their own boundary
+    return content_type.partition(";")[0].strip().lower() == MULTIPART_FORM
 
 
 def make_curl_body(
@@ -387,7 +405,7 @@ def make_curl_body(
     # is binary, and the parts are taken apart and rendered individually below — each with
     # its own NUL check, since only part of such a body reaches the command line
     content_type = headers.get("content-type", "")
-    if "multipart" in content_type:
+    if is_multipart_form(content_type):
         return make_multipart_curl_args(body, content_type, quote, quote_bytes, options)
     reject_nul(body, "body")
     if isinstance(body, bytes):
@@ -439,13 +457,17 @@ def make_curl_string(
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
         headers["content-type"] = "text/plain"
+    body_args = make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options)
+    # the parts are rendered with -F, which brings a boundary of its own
+    if body_args and is_multipart_form(headers.get("content-type", "")):
+        headers["content-type"] = MULTIPART_BOUNDARY_PARAM.sub("", headers["content-type"])
     args = [
         "--http2" if http2 else None,
         options["globoff"] if URL_GLOB.search(url) else None,
         f"{options['request']} {method}" if method != "GET" else None,
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep, mask),
-        *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
+        *body_args,
     ]
     parts = [str(entity) for entity in args if entity]
     command = " ".join([part for part in (shell_conf.binary, shell_conf.args_prefix) if part])

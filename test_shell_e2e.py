@@ -39,6 +39,7 @@ def capture_server() -> Iterator[CaptureServer]:
                     "method": self.command,
                     "path": self.path,
                     "cookie": self.headers.get("cookie"),
+                    "content_type": self.headers.get("content-type"),
                     "body": self.rfile.read(length),
                 }
             )
@@ -123,6 +124,17 @@ _SH_ONLY_REQUESTS = [
         # the leading @ that --data and --data-binary would read as a filename
         dict(method="POST", url="/post", content=b"@\xff\xfe"),
         id="RAW BYTES LEADING AT",
+    ),
+    pytest.param(
+        # not form-data, so not taken apart into -F parts: the body goes out as it is, with
+        # the boundary it was written with. Sh only, for the CRLFs the body is made of
+        dict(
+            method="POST",
+            url="/post",
+            headers={"content-type": "multipart/related; boundary=b"},
+            content=b'--b\r\nContent-Type: application/json\r\n\r\n{"a": 1}\r\n--b--\r\n',
+        ),
+        id="MULTIPART RELATED",
     ),
 ]
 
@@ -256,7 +268,7 @@ def run_sh(
     command: str,
     tmp_path: pathlib.Path,
     captured: list[dict[str, Any]],
-) -> bytes:
+) -> dict[str, Any]:
     # run from tmp_path, where a file part's relative filename resolves
     script_path = tmp_path / "cmd.sh"
     script_path.write_text(command, encoding="utf-8")
@@ -269,7 +281,7 @@ def run_sh(
     debug = (completed.returncode, completed.stdout, completed.stderr)
     assert completed.returncode == 0, debug
     assert len(captured) == 1, (captured, debug)
-    return captured[0]["body"]
+    return captured[0]
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
@@ -283,7 +295,7 @@ def test_sh_multipart_field_headers_attribute_e2e(
     secret = write_secret(tmp_path)
     value = f"x;headers=@{secret}"
     req = httpx.Request(method="POST", url=base_url + "/post", files={"field": (None, value)})
-    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)["body"]
     assert value.encode() in body, body
     assert b"SECRET-FILE-CONTENT" not in body, body
 
@@ -299,7 +311,7 @@ def test_sh_multipart_filename_e2e(
     base_url, captured = capture_server
     (tmp_path / filename).write_bytes(b"FILE-CONTENT")
     req = httpx.Request(method="POST", url=base_url + "/post", files={"f": (filename, b"FILE-CONTENT")})
-    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)["body"]
     assert f'filename="{filename}"'.encode() in body, body
     assert b"FILE-CONTENT" in body, body
 
@@ -316,6 +328,41 @@ def test_sh_cookie_file_reference_e2e(
     req = httpx.Request(method="GET", url=base_url + "/get", headers={"cookie": str(jar)})
     run_sh(to_curl(req, shell=SH), tmp_path, captured)
     assert captured[0]["cookie"] == str(jar)
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_multipart_single_boundary_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # -F picks a boundary of its own and curl appends it to the -H content-type, so the one
+    # the request was written with has to stay out of the header
+    base_url, captured = capture_server
+    (tmp_path / "a.txt").write_bytes(b"FILE-CONTENT")
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"f": ("a.txt", b"x")}, data={"k": "v"})
+    request = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    content_type = request["content_type"]
+    assert content_type.count("boundary=") == 1, content_type
+    boundary = content_type.split("boundary=")[1].encode()
+    assert request["body"].startswith(b"--" + boundary), request
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_multipart_empty_filename_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # a browser sends an empty file input as a file part with filename="", which -F 'f=@'
+    # could not render: curl exited before sending anything
+    base_url, captured = capture_server
+    req = httpx.Request(
+        method="POST",
+        url=base_url + "/post",
+        headers={"content-type": "multipart/form-data; boundary=b"},
+        content=b'--b\r\nContent-Disposition: form-data; name="f"; filename=""\r\n\r\n\r\n--b--\r\n',
+    )
+    request = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    assert b'name="f"; filename=""' in request["body"], request
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
