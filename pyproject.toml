@@ -25,6 +25,7 @@ authors = [
 # classifier, it is superseded by the SPDX expression above (PEP 639)
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
