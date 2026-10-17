@@ -17,3 +17,7 @@ types:
 
 pytest:
   uv run pytest -vv
+
+# warnings are errors, as on CI: a broken link or reference fails the build
+docs:
+  uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
