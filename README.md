@@ -68,8 +68,13 @@ async def log_request_as_curl(request: Request, call_next):
     # Reading the body in a middleware is safe here: starlette caches what
     # to_curl_async() consumed and replays it, so the route handler still
     # receives the full body (starlette >= 0.28).
-    # Keep tokens, API keys and cookie values out of the log.
-    curl = await to_curl_async(request, mask_headers=SENSITIVE_HEADERS)
+    curl = await to_curl_async(
+        request,
+        # drop the headers every client sends on its own, they only add noise
+        exclude_headers=["accept", "accept-encoding", "connection", "user-agent"],
+        # keep tokens, API keys and cookie values out of the log
+        mask_headers=SENSITIVE_HEADERS,
+    )
     # Log before handing over to the handler, so the command is captured
     # even for requests the handler then fails on — the ones worth replaying.
     logger.info("incoming request: %s", curl)
@@ -79,7 +84,7 @@ async def log_request_as_curl(request: Request, call_next):
 An authenticated `POST` with a JSON body arrives in the log as:
 
 ```
-incoming request: curl -X POST -H 'host: api.example.com' -H 'accept: */*' -H 'authorization: Bearer ***' -H 'content-type: application/json' -d '{"item":"book","qty":2}' http://api.example.com/orders
+incoming request: curl -X POST -H 'host: api.example.com' -H 'authorization: Bearer ***' -H 'content-type: application/json' -d '{"item":"book","qty":2}' http://api.example.com/orders
 ```
 
 Every value in that command was chosen by the client; [Quoting and untrusted values](#quoting-and-untrusted-values) is what makes it safe to paste anyway.
