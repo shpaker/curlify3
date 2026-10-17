@@ -18,6 +18,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Header filtering per call: `exclude_headers` drops the noise, `include_headers` keeps only what matters
+- A pytest plugin that attaches the curl commands of the requests a failing test sent to its report
 - Zero runtime dependencies
 - Fully annotated and `py.typed`, so the types reach your own type checker
 
@@ -167,6 +168,73 @@ print(await to_curl_async(request))
 ```
 
 The url and the cookie header are left bare when every character in them is safe, which is the common case and keeps the command short. Anything else is quoted — including the `?` of a single-parameter query string, which `zsh` would otherwise reject as an unmatched glob.
+
+### pytest: curl for failing tests
+
+The bundled pytest plugin records the HTTP requests a test sends and, when the test fails, attaches them to its report as commands to replay from a terminal. Load it from the root `conftest.py` (or pass `-p curlify3.pytest_plugin`):
+
+```python
+pytest_plugins = ["curlify3.pytest_plugin"]
+```
+
+It is not registered through a `pytest11` entry point on purpose: importing `curlify3` imports every installed library it has an adapter for, and that should not land on every pytest run in an environment that merely has `curlify3` installed.
+
+Loading the plugin records nothing yet. Turn the capture on for the whole run with `--curl-on-failure`, or in the ini file:
+
+```ini
+[pytest]
+curl_on_failure = true
+```
+
+A failing test then reports every request it sent, numbered in the order they went out, under the status of the response — or the exception the client raised:
+
+```python
+from fastapi.testclient import TestClient
+
+def test_create_order():
+    client = TestClient(app)
+    client.post("/login", json={"user": "alice"})
+    resp = client.post("/orders", json={"qty": 2})
+    assert resp.status_code == 201
+```
+
+```
+------------------------------ Captured curl call ------------------------------
+# [1] 200
+curl --http2 -X POST -H 'host: testserver' ... -d '{"user":"alice"}' http://testserver/login
+# [2] 422
+curl --http2 -X POST -H 'host: testserver' ... -d '{"qty":2}' http://testserver/orders
+```
+
+The comments are shell comments, so the section pastes as a whole. With the global switch the capture starts with the test's setup, so requests sent by its fixtures are listed too. Passing tests report nothing.
+
+To capture a single test, request the `curl_requests` fixture instead of the global switch. It returns the commands rendered so far, which also makes them available to assertions and messages:
+
+```python
+import httpx
+
+def test_profile(curl_requests):
+    resp = httpx.get("https://api.example.com/me")
+    assert resp.status_code == 200, curl_requests[-1]
+```
+
+Requests are recorded at the clients' `send`: `httpx` and `httpx2`, sync and async — which covers the starlette / FastAPI `TestClient` — `requests` and `niquests`, sync and async. One call to `send` is one entry: `requests` follows a redirect by calling `send` again, so every hop is listed, while `httpx` follows it inside `send`, so only the first request is. The body is rendered as the request is sent, before anything consumes it. A request that cannot be rendered is listed as a `# not rendered: …` comment and never fails the test.
+
+| ini option | default | |
+| --- | --- | --- |
+| `curl_on_failure` | `false` | the same as `--curl-on-failure` |
+| `curl_exclude_headers` | none | header names left out of the commands, one per line |
+| `curl_max_requests` | `20` | how many of the last requests a report lists; `0` lists all |
+
+The commands carry the headers as sent, `Authorization` and cookies included, and test reports often end up in CI logs. Drop what should not be there:
+
+```ini
+[pytest]
+curl_on_failure = true
+curl_exclude_headers =
+    authorization
+    cookie
+```
 
 ## API
 

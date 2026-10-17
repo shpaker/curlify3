@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- A pytest plugin, `curlify3.pytest_plugin`, that attaches the curl commands of the HTTP requests a failing test sent to its report as a `Captured curl` section ([#44](https://github.com/shpaker/curlify3/issues/44)). The requests are numbered in the order they were sent and labelled with the response status, or with the exception the client raised. It is loaded explicitly, with `pytest_plugins = ["curlify3.pytest_plugin"]` or `-p curlify3.pytest_plugin`, not through a `pytest11` entry point: importing `curlify3` imports every installed library it has an adapter for, which would otherwise land on the startup of every pytest run in an environment that merely has `curlify3` installed. Loaded, it still records nothing until `--curl-on-failure` / the `curl_on_failure` ini option turns it on for the run, or a test requests the `curl_requests` fixture, which also returns the rendered commands. Requests are recorded at the clients' `send` — `httpx`, `httpx2` (and with it the starlette / FastAPI `TestClient`), `requests` and `niquests`, sync and async — and rendered as they are sent, before anything consumes the body. `curl_exclude_headers` feeds `exclude_headers`, and `curl_max_requests` (default 20, `0` for all) keeps the report to the last requests. A request that cannot be rendered is listed as a comment and never fails the test.
+
 ## 0.14 (2026-10-16)
 
 ### Added
