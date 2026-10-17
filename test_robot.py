@@ -93,6 +93,15 @@ def test_keyword_arguments_override_defaults(
     )
 
 
+def test_mask_headers(
+    prepared: requests.PreparedRequest,
+) -> None:
+    library = CurlifyLibrary(mask_headers=["x-token"])
+    assert library.to_curl(prepared) == to_curl(prepared, mask_headers=["x-token"])
+    assert "***" in library.to_curl(prepared)
+    assert library.to_curl(prepared, mask_headers=[]) == to_curl(prepared)
+
+
 def test_powershell_default(
     prepared: requests.PreparedRequest,
 ) -> None:

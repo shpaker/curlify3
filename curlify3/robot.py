@@ -71,9 +71,9 @@ class CurlifyLibrary:
 
     The import arguments set the defaults every keyword falls back to; each keyword
     takes the same arguments to override them for one call. ``shell`` is ``sh`` or
-    ``powershell``, ``include_headers`` / ``exclude_headers`` are lists of header
-    names matched case-insensitively, ``level`` is the log level of the logging
-    keywords.
+    ``powershell``, ``include_headers`` / ``exclude_headers`` / ``mask_headers`` are
+    lists of header names matched case-insensitively, ``level`` is the log level of
+    the logging keywords.
     """
 
     def __init__(
@@ -83,6 +83,7 @@ class CurlifyLibrary:
         long_options: bool = False,
         include_headers: list[str] | None = None,
         exclude_headers: list[str] | None = None,
+        mask_headers: list[str] | None = None,
         level: Level = "INFO",
     ) -> None:
         self._shell = shell
@@ -90,6 +91,7 @@ class CurlifyLibrary:
         self._long_options = long_options
         self._include_headers = include_headers
         self._exclude_headers = exclude_headers or []
+        self._mask_headers = mask_headers or []
         self._level = level
 
     @keyword("To Curl")
@@ -101,6 +103,7 @@ class CurlifyLibrary:
         long_options: bool | None = None,
         include_headers: list[str] | None = None,
         exclude_headers: list[str] | None = None,
+        mask_headers: list[str] | None = None,
     ) -> str:
         """Returns ``request`` rendered as a curl command.
 
@@ -116,6 +119,7 @@ class CurlifyLibrary:
             long_options=self._long_options if long_options is None else long_options,
             include_headers=self._include_headers if include_headers is None else include_headers,
             exclude_headers=self._exclude_headers if exclude_headers is None else exclude_headers,
+            mask_headers=self._mask_headers if mask_headers is None else mask_headers,
         )
 
     @keyword("Log As Curl")
@@ -128,6 +132,7 @@ class CurlifyLibrary:
         long_options: bool | None = None,
         include_headers: list[str] | None = None,
         exclude_headers: list[str] | None = None,
+        mask_headers: list[str] | None = None,
     ) -> str:
         """Writes ``request`` rendered as a curl command to the log and returns it.
 
@@ -142,6 +147,7 @@ class CurlifyLibrary:
             long_options=long_options,
             include_headers=include_headers,
             exclude_headers=exclude_headers,
+            mask_headers=mask_headers,
         )
         logger.write(command, self._level if level is None else level)
         return command
@@ -156,6 +162,7 @@ class CurlifyLibrary:
         long_options: bool | None = None,
         include_headers: list[str] | None = None,
         exclude_headers: list[str] | None = None,
+        mask_headers: list[str] | None = None,
     ) -> None:
         """Logs every request sent through the RequestsLibrary session ``alias`` as a curl command.
 
@@ -179,6 +186,7 @@ class CurlifyLibrary:
                     "long_options": long_options,
                     "include_headers": include_headers,
                     "exclude_headers": exclude_headers,
+                    "mask_headers": mask_headers,
                 },
             )
         )

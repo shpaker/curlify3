@@ -12,9 +12,15 @@ Quote: TypeAlias = Callable[[str], str]
 BytesQuote: TypeAlias = Callable[[bytes], str]
 Options: TypeAlias = Mapping[str, str]
 
-MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?')
-PART_NAME: Final = re.compile(rb'name="([^"]*)"')
-PART_FILENAME: Final = re.compile(rb'filename="([^"]*)"')
+# media type and parameter names are case-insensitive (RFC 9110)
+MULTIPART_FORM: Final = "multipart/form-data"
+MULTIPART_BOUNDARY: Final = re.compile(r'boundary="?([^";]+)"?', re.IGNORECASE)
+# the parameter with the ; before it: -F makes curl pick a boundary of its own and append
+# it to a content-type header given with -H, so one left in sent two boundary parameters
+MULTIPART_BOUNDARY_PARAM: Final = re.compile(r'\s*;\s*boundary=("[^"]*"|[^;]*)', re.IGNORECASE)
+# anchored on the ; before them: an unanchored name=" also matched inside filename="
+PART_NAME: Final = re.compile(rb';\s*name="([^"]*)"', re.IGNORECASE)
+PART_FILENAME: Final = re.compile(rb';\s*filename="([^"]*)"', re.IGNORECASE)
 
 # curl reads a leading @ in a --data value, and a leading @ or < in a --form value, as
 # "load the value from this file" rather than as the value itself. Such a value has to go
@@ -48,6 +54,23 @@ SH_BYTE_ESCAPES: Final[Mapping[int, str]] = {0x27: "\\'", 0x5C: "\\\\"}
 SH: Final = "sh"
 POWERSHELL: Final = "powershell"
 
+# what a masked value is replaced with; the header name, the auth scheme and the cookie
+# names stay, so the command still shows what the request carried, just not the secret
+MASKED: Final = "***"
+# the headers that carry credentials in the common case, for mask_headers=SENSITIVE_HEADERS
+SENSITIVE_HEADERS: Final = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    }
+)
+# their value is "<scheme> <credentials>", and the scheme tells Basic from Bearer
+AUTH_SCHEME_HEADERS: Final = frozenset({"authorization", "proxy-authorization"})
+
 SHORT_OPTIONS: Final[Options] = {
     "request": "-X",
     "header": "-H",
@@ -57,6 +80,8 @@ SHORT_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "-F",
     "form_string": "--form-string",
+    "globoff": "-g",
+    "head": "-I",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -66,7 +91,13 @@ LONG_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "--form",
     "form_string": "--form-string",
+    "globoff": "--globoff",
+    "head": "--head",
 }
+
+# curl expands [1-3] and {a,b} in a url into several requests, and drops the braces of a
+# lone {x}; a url holding any of these goes out with globbing off
+URL_GLOB: Final = re.compile(r"[\[\]{}]")
 
 
 def quote_sh(
@@ -206,14 +237,54 @@ def make_header_filter(
     return lambda name: (include is None or name in include) and name not in exclude
 
 
+def mask_header_value(
+    name: str,
+    value: str,
+) -> str:
+    if name in AUTH_SCHEME_HEADERS:
+        scheme, separator, _ = value.strip().partition(" ")
+        if separator:
+            return f"{scheme} {MASKED}"
+    return MASKED
+
+
+def mask_cookies(
+    cookies: str,
+) -> str:
+    # each pair keeps its name: which cookies a request carried is often the whole question
+    pairs = []
+    for pair in cookies.split(";"):
+        name, separator, _ = pair.strip().partition("=")
+        pairs.append(f"{name}={MASKED}" if separator else MASKED)
+    return "; ".join(pairs)
+
+
 def make_curl_headers(
     headers: Headers,
     quote: Quote,
     options: Options,
     keep: Callable[[str], bool],
+    mask: frozenset[str],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items() if keep(header)]
+    args = []
+    for header, value in headers.items():
+        if not keep(header):
+            continue
+        # an empty value has nothing to hide, and stays the -H 'name;' that sends it
+        if value and header in mask:
+            value = mask_header_value(header, value)
+        args.append(f"{option} {quote(make_header_arg(header, value))}")
+    return args
+
+
+def make_header_arg(
+    header: str,
+    value: str,
+) -> str:
+    # curl drops a header passed with nothing after the colon; the ; spelling is the one
+    # that sends it with an empty value
+    return f"{header}: {value}" if value else f"{header};"
 
 
 def make_curl_cookies(
@@ -296,7 +367,11 @@ def make_multipart_curl_args(
         if name is None:
             continue
         filename = PART_FILENAME.search(head)
-        if filename is not None:
+        if filename is not None and not filename.group(1):
+            # what a browser sends for a file input left empty; -F 'name=@' names a file
+            # curl cannot open, and the filename attribute is the one way to keep it a file part
+            part, option = name.group(1) + b'=;filename=""', options["form"]
+        elif filename is not None:
             # here the leading @ is the point: -F is what makes curl send the file the
             # request sent, so a file part is spelled name=@filename
             part, option = name.group(1) + b"=@" + quote_form_filename(filename.group(1)), options["form"]
@@ -308,6 +383,14 @@ def make_multipart_curl_args(
             option = options["form_string"] if is_form_parsed(value) else options["form"]
         body_parts.append(f"{option} {quote_multipart_part(part, quote, quote_bytes)}")
     return body_parts
+
+
+def is_multipart_form(
+    content_type: str,
+) -> bool:
+    # only form-data is what -F builds: the parts of multipart/mixed or multipart/related
+    # carry no field names, and those bodies go out as they are, with their own boundary
+    return content_type.partition(";")[0].strip().lower() == MULTIPART_FORM
 
 
 def make_curl_body(
@@ -324,7 +407,7 @@ def make_curl_body(
     # is binary, and the parts are taken apart and rendered individually below — each with
     # its own NUL check, since only part of such a body reaches the command line
     content_type = headers.get("content-type", "")
-    if "multipart" in content_type:
+    if is_multipart_form(content_type):
         return make_multipart_curl_args(body, content_type, quote, quote_bytes, options)
     reject_nul(body, "body")
     if isinstance(body, bytes):
@@ -335,6 +418,21 @@ def make_curl_body(
     # the named file instead of the body the request carried
     option = options["data_raw"] if body.startswith(DATA_FILE_REF) else options["data"]
     return [f"{option} {quote(body)}"]
+
+
+def make_curl_method(
+    method: str,
+    has_body: bool,
+    options: Options,
+) -> str | None:
+    # a body makes curl send POST, so a GET that carries one names its method
+    if method == "GET" and not has_body:
+        return None
+    # -X HEAD keeps curl waiting for a response body that never comes; -I asks for HEAD
+    # and reads none
+    if method == "HEAD" and not has_body:
+        return options["head"]
+    return f"{options['request']} {method}"
 
 
 def make_curl_string(
@@ -349,6 +447,7 @@ def make_curl_string(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     if shell not in SHELLS:
         raise ValueError(f"unknown shell: {shell!r}, expected one of {sorted(SHELLS)}")
@@ -366,16 +465,26 @@ def make_curl_string(
     keep = make_header_filter(include_headers, exclude_headers)
     if not keep("cookie"):
         cookies = None
+    # masking only changes how a value is printed, the same as the filter: the body
+    # below still reads the real headers
+    mask = _header_names(mask_headers, "mask_headers")
+    if cookies and "cookie" in mask:
+        cookies = mask_cookies(cookies)
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
         headers["content-type"] = "text/plain"
+    body_args = make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options)
+    # the parts are rendered with -F, which brings a boundary of its own
+    if body_args and is_multipart_form(headers.get("content-type", "")):
+        headers["content-type"] = MULTIPART_BOUNDARY_PARAM.sub("", headers["content-type"])
     args = [
         "--http2" if http2 else None,
-        f"{options['request']} {method}" if method != "GET" else None,
+        options["globoff"] if URL_GLOB.search(url) else None,
+        make_curl_method(method, bool(body_args), options),
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
-        *make_curl_headers(headers, shell_conf.quote, options, keep),
-        *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
+        *make_curl_headers(headers, shell_conf.quote, options, keep, mask),
+        *body_args,
     ]
     parts = [str(entity) for entity in args if entity]
     command = " ".join([part for part in (shell_conf.binary, shell_conf.args_prefix) if part])
@@ -392,6 +501,7 @@ def to_curl(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command.
 
@@ -411,12 +521,22 @@ def to_curl(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
-    Raises ValueError if the request type or the shell value is not recognized, if
+    mask_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    masked cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to masking
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
+    Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
+    if no adapter accepts the request; the message names its type, and points to
+    to_curl_async() when that one accepts it instead.
+
+    Raises ValueError if the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", if any value contains a
     line break and shell="powershell", or if the body or a field value contains a
-    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    NUL byte. Raises TypeError if include_headers, exclude_headers or mask_headers
+    is a str rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj(request)
     return make_curl_string(
@@ -431,6 +551,7 @@ def to_curl(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        mask_headers=mask_headers,
     )
 
 
@@ -441,6 +562,7 @@ async def to_curl_async(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command, awaiting the body.
 
@@ -459,12 +581,22 @@ async def to_curl_async(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
-    Raises ValueError if the request type or the shell value is not recognized, if
+    mask_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    masked cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to masking
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
+    Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
+    if no adapter accepts the request; the message names its type, and points to
+    to_curl() when that one accepts it instead.
+
+    Raises ValueError if the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", if any value contains a
     line break and shell="powershell", or if the body or a field value contains a
-    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    NUL byte. Raises TypeError if include_headers, exclude_headers or mask_headers
+    is a str rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj_async(request)
     return make_curl_string(
@@ -479,4 +611,5 @@ async def to_curl_async(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        mask_headers=mask_headers,
     )
