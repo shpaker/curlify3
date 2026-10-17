@@ -54,6 +54,23 @@ SH_BYTE_ESCAPES: Final[Mapping[int, str]] = {0x27: "\\'", 0x5C: "\\\\"}
 SH: Final = "sh"
 POWERSHELL: Final = "powershell"
 
+# what a masked value is replaced with; the header name, the auth scheme and the cookie
+# names stay, so the command still shows what the request carried, just not the secret
+MASKED: Final = "***"
+# the headers that carry credentials in the common case, for mask_headers=SENSITIVE_HEADERS
+SENSITIVE_HEADERS: Final = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    }
+)
+# their value is "<scheme> <credentials>", and the scheme tells Basic from Bearer
+AUTH_SCHEME_HEADERS: Final = frozenset({"authorization", "proxy-authorization"})
+
 SHORT_OPTIONS: Final[Options] = {
     "request": "-X",
     "header": "-H",
@@ -220,14 +237,45 @@ def make_header_filter(
     return lambda name: (include is None or name in include) and name not in exclude
 
 
+def mask_header_value(
+    name: str,
+    value: str,
+) -> str:
+    if name in AUTH_SCHEME_HEADERS:
+        scheme, separator, _ = value.strip().partition(" ")
+        if separator:
+            return f"{scheme} {MASKED}"
+    return MASKED
+
+
+def mask_cookies(
+    cookies: str,
+) -> str:
+    # each pair keeps its name: which cookies a request carried is often the whole question
+    pairs = []
+    for pair in cookies.split(";"):
+        name, separator, _ = pair.strip().partition("=")
+        pairs.append(f"{name}={MASKED}" if separator else MASKED)
+    return "; ".join(pairs)
+
+
 def make_curl_headers(
     headers: Headers,
     quote: Quote,
     options: Options,
     keep: Callable[[str], bool],
+    mask: frozenset[str],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(make_header_arg(header, value))}" for header, value in headers.items() if keep(header)]
+    args = []
+    for header, value in headers.items():
+        if not keep(header):
+            continue
+        # an empty value has nothing to hide, and stays the -H 'name;' that sends it
+        if value and header in mask:
+            value = mask_header_value(header, value)
+        args.append(f"{option} {quote(make_header_arg(header, value))}")
+    return args
 
 
 def make_header_arg(
@@ -399,6 +447,7 @@ def make_curl_string(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     if shell not in SHELLS:
         raise ValueError(f"unknown shell: {shell!r}, expected one of {sorted(SHELLS)}")
@@ -416,6 +465,11 @@ def make_curl_string(
     keep = make_header_filter(include_headers, exclude_headers)
     if not keep("cookie"):
         cookies = None
+    # masking only changes how a value is printed, the same as the filter: the body
+    # below still reads the real headers
+    mask = _header_names(mask_headers, "mask_headers")
+    if cookies and "cookie" in mask:
+        cookies = mask_cookies(cookies)
     if "content-length" in headers:
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
@@ -429,7 +483,7 @@ def make_curl_string(
         options["globoff"] if URL_GLOB.search(url) else None,
         make_curl_method(method, bool(body_args), options),
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
-        *make_curl_headers(headers, shell_conf.quote, options, keep),
+        *make_curl_headers(headers, shell_conf.quote, options, keep, mask),
         *body_args,
     ]
     parts = [str(entity) for entity in args if entity]
@@ -447,6 +501,7 @@ def to_curl(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command.
 
@@ -466,6 +521,12 @@ def to_curl(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
+    mask_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    masked cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to masking
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
     Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
     if no adapter accepts the request; the message names its type, and points to
     to_curl_async() when that one accepts it instead.
@@ -474,8 +535,8 @@ def to_curl(
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", if any value contains a
     line break and shell="powershell", or if the body or a field value contains a
-    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    NUL byte. Raises TypeError if include_headers, exclude_headers or mask_headers
+    is a str rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj(request)
     return make_curl_string(
@@ -490,6 +551,7 @@ def to_curl(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        mask_headers=mask_headers,
     )
 
 
@@ -500,6 +562,7 @@ async def to_curl_async(
     long_options: bool = False,
     include_headers: Iterable[str] | None = None,
     exclude_headers: Iterable[str] = (),
+    mask_headers: Iterable[str] = (),
 ) -> str:
     """Render a request object as a curl command, awaiting the body.
 
@@ -518,6 +581,12 @@ async def to_curl_async(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
+    mask_headers keeps the named headers but prints *** in place of their values;
+    authorization and proxy-authorization keep the auth scheme (Bearer ***), and a
+    masked cookie keeps each cookie's name (-b 'session=***'). It applies to what
+    the filters left, matches names case-insensitively and defaults to masking
+    nothing; SENSITIVE_HEADERS holds the usual credential-carrying names.
+
     Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
     if no adapter accepts the request; the message names its type, and points to
     to_curl() when that one accepts it instead.
@@ -526,8 +595,8 @@ async def to_curl_async(
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", if any value contains a
     line break and shell="powershell", or if the body or a field value contains a
-    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
-    rather than an iterable of names, or holds a name that is not a str.
+    NUL byte. Raises TypeError if include_headers, exclude_headers or mask_headers
+    is a str rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj_async(request)
     return make_curl_string(
@@ -542,4 +611,5 @@ async def to_curl_async(
         long_options=long_options,
         include_headers=include_headers,
         exclude_headers=exclude_headers,
+        mask_headers=mask_headers,
     )
