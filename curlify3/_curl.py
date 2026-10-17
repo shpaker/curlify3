@@ -74,6 +74,7 @@ SHORT_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "-F",
     "form_string": "--form-string",
+    "globoff": "-g",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -83,7 +84,12 @@ LONG_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "--form",
     "form_string": "--form-string",
+    "globoff": "--globoff",
 }
+
+# curl expands [1-3] and {a,b} in a url into several requests, and drops the braces of a
+# lone {x}; a url holding any of these goes out with globbing off
+URL_GLOB: Final = re.compile(r"[\[\]{}]")
 
 
 def quote_sh(
@@ -253,11 +259,24 @@ def make_curl_headers(
     mask: frozenset[str],
 ) -> list[str]:
     option = options["header"]
-    return [
-        f"{option} {quote(f'{header}: {mask_header_value(header, value) if header in mask else value}')}"
-        for header, value in headers.items()
-        if keep(header)
-    ]
+    args = []
+    for header, value in headers.items():
+        if not keep(header):
+            continue
+        # an empty value has nothing to hide and keeps the ; spelling that sends it empty
+        if value and header in mask:
+            value = mask_header_value(header, value)
+        args.append(f"{option} {quote(make_header_arg(header, value))}")
+    return args
+
+
+def make_header_arg(
+    header: str,
+    value: str,
+) -> str:
+    # curl drops a header passed with nothing after the colon; the ; spelling is the one
+    # that sends it with an empty value
+    return f"{header}: {value}" if value else f"{header};"
 
 
 def make_curl_cookies(
@@ -422,6 +441,7 @@ def make_curl_string(
         headers["content-type"] = "text/plain"
     args = [
         "--http2" if http2 else None,
+        options["globoff"] if URL_GLOB.search(url) else None,
         f"{options['request']} {method}" if method != "GET" else None,
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep, mask),

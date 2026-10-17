@@ -16,7 +16,7 @@ from typing import Any
 from django.http import HttpRequest
 from django.http.request import RawPostDataException
 
-from curlify3._base import BaseRequestData
+from curlify3._base import BaseRequestData, raw_request_uri
 from curlify3._types import Body
 
 
@@ -30,7 +30,10 @@ class DjangoRequest(BaseRequestData[Any]):
     def url(
         self,
     ) -> str:
-        return self._request.build_absolute_uri()
+        # the path is rebuilt from PATH_INFO, which WSGI hands over percent-decoded, so an
+        # encoded / comes back as a path separator; the target as it arrived wins when the
+        # server keeps it (RAW_URI or REQUEST_URI, as gunicorn and uwsgi do)
+        return self._request.build_absolute_uri(raw_request_uri(self._request.META))
 
     def body(
         self,

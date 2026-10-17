@@ -103,6 +103,12 @@ _E2E_REQUESTS = [
         # bare ? as an unmatched glob
         id="URL SINGLE PARAM",
     ),
+    pytest.param(
+        # curl expands [] and {} in a url unless globbing is off: {x} lost its braces and a
+        # [1-3] range went out as three requests
+        dict(method="GET", url="/get?a[]=1&b={x}&id=[1-3]"),
+        id="URL GLOB CHARACTERS",
+    ),
 ]
 
 # $'...' is ANSI-C quoting, which bash, zsh and ksh expand and powershell has no answer for,
