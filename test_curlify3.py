@@ -1,4 +1,5 @@
 import asyncio
+import io
 import pathlib
 import sys
 import urllib.request
@@ -25,6 +26,7 @@ from aiohttp.test_utils import make_mocked_request
 from django.conf import settings as django_settings
 from django.http import HttpRequest as DjangoHttpRequest
 from django.test import RequestFactory
+from multidict import CIMultiDict
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, UnsupportedRequestError, to_curl, to_curl_async
@@ -173,7 +175,7 @@ _PARAMS = [
             url="https://httpbin.org/post",
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'image=@image.png' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data' -F 'image=@image.png' https://httpbin.org/post",
         id="FILE BIN",
     ),
     pytest.param(
@@ -183,7 +185,7 @@ _PARAMS = [
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             data={"foo": "bar"},
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
         id="FILE + FORM",
     ),
     pytest.param(
@@ -192,7 +194,7 @@ _PARAMS = [
             url="https://httpbin.org/post",
             files={"this-file": open(__file__, "rb")},
         ),
-        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data; boundary={boundary}' -F 'this-file=@test_curlify3.py' https://httpbin.org/post",
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: multipart/form-data' -F 'this-file=@test_curlify3.py' https://httpbin.org/post",
         id="FILE TXT",
     ),
 ]
@@ -207,9 +209,6 @@ def test_httpx_to_curl(
     expected: str,
 ) -> None:
     results = to_curl(req)
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -223,9 +222,6 @@ async def test_httpx_async_to_curl(
     expected: str,
 ) -> None:
     results = await to_curl_async(req)
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -291,7 +287,7 @@ async def test_httpx_async_to_curl(
                 url="https://httpbin.org/post",
                 files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             ),
-            "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'image=@image.png' https://httpbin.org/post",
+            "curl -X POST -H 'content-type: multipart/form-data' -F 'image=@image.png' https://httpbin.org/post",
             id="FILE",
         ),
         pytest.param(
@@ -301,7 +297,7 @@ async def test_httpx_async_to_curl(
                 files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
                 data={"foo": "bar"},
             ),
-            "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
+            "curl -X POST -H 'content-type: multipart/form-data' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
             id="FILE + FORM",
         ),
     ],
@@ -312,11 +308,6 @@ def test_requests_to_curl(
 ) -> None:
     prepared = req.prepare()
     results = to_curl(prepared)
-    # requests declares its header values as str | bytes, multipart ones are str
-    content_type = prepared.headers.get("content-type")
-    if isinstance(content_type, str) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -383,7 +374,7 @@ _NIQUESTS_PARAMS = [
             url="https://httpbin.org/post",
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
         ),
-        "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'image=@image.png' https://httpbin.org/post",
+        "curl -X POST -H 'content-type: multipart/form-data' -F 'image=@image.png' https://httpbin.org/post",
         id="FILE",
     ),
     pytest.param(
@@ -393,7 +384,7 @@ _NIQUESTS_PARAMS = [
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             data={"foo": "bar"},
         ),
-        "curl -X POST -H 'content-type: multipart/form-data; boundary={boundary}' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
+        "curl -X POST -H 'content-type: multipart/form-data' -F 'foo=bar' -F 'image=@image.png' https://httpbin.org/post",
         id="FILE + FORM",
     ),
 ]
@@ -409,11 +400,6 @@ def test_niquests_to_curl(
 ) -> None:
     prepared = req.prepare()
     results = to_curl(prepared)
-    # niquests declares headers as optional; a prepared request always has them
-    content_type = prepared.headers.get("content-type") if prepared.headers is not None else None
-    if isinstance(content_type, str) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -441,9 +427,6 @@ async def test_starlette_async_to_curl(
         response = await client.send(req)
     assert response.status_code == 200, response.status_code
     results = response.text
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -823,7 +806,7 @@ _POWERSHELL_PARAMS = [
             files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             data={"foo": "bar"},
         ),
-        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: multipart/form-data; boundary={boundary}" '
+        'curl.exe --% -X POST -H "host: httpbin.org" -H "content-type: multipart/form-data" '
         '-F "foo=bar" -F "image=@image.png" "https://httpbin.org/post"',
         id="FILE + FORM",
     ),
@@ -839,9 +822,6 @@ def test_httpx_to_curl_powershell(
     expected: str,
 ) -> None:
     results = to_curl(req, shell=POWERSHELL)
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -855,9 +835,6 @@ async def test_httpx_async_to_curl_powershell(
     expected: str,
 ) -> None:
     results = await to_curl_async(req, shell=POWERSHELL)
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -1117,7 +1094,7 @@ def test_httpx_to_curl_pretty(
                 files={"image": open(_BINARY_ATTACHMENT_PATH, "rb")},
             ),
             "curl --request POST --cookie bar=baz --header 'host: httpbin.org' "
-            "--header 'content-type: multipart/form-data; boundary={boundary}' "
+            "--header 'content-type: multipart/form-data' "
             "--form 'image=@image.png' https://httpbin.org/post",
             id="COOKIE + FILE",
         ),
@@ -1128,9 +1105,6 @@ def test_httpx_to_curl_long_options(
     expected: str,
 ) -> None:
     results = to_curl(req, long_options=True)
-    if (content_type := req.headers.get("content-type")) and "boundary" in content_type:
-        boundary = content_type.rsplit("boundary=")[1]
-        expected = expected.format(boundary=boundary)
     assert results == expected, results
 
 
@@ -1281,7 +1255,7 @@ _DJANGO_PARAMS = [
     pytest.param(
         # RequestFactory multipart-encodes a dict body, with a fixed boundary
         _DJANGO_RF.post("/post", data={"bar": "baz"}),
-        "curl -X POST -H 'content-type: multipart/form-data; boundary=BoUnDaRyStRiNg' -F 'bar=baz' http://testserver/post",
+        "curl -X POST -H 'content-type: multipart/form-data' -F 'bar=baz' http://testserver/post",
         id="MULTIPART",
     ),
 ]
@@ -1405,7 +1379,8 @@ _TORNADO_PARAMS = [
             method="POST",
             body="foo",
         ),
-        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        # tornado sends a POST without a content-type as form-encoded, and so does the command
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'foo' https://httpbin.org/post",
         id="TEXT",
     ),
     pytest.param(
@@ -1414,7 +1389,7 @@ _TORNADO_PARAMS = [
             method="POST",
             body=b"\xff\xfe\x81binary",
         ),
-        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        r"curl -X POST -H 'content-type: application/x-www-form-urlencoded' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
         id="BINARY",
     ),
 ]
@@ -1518,7 +1493,8 @@ _URLLIB_PARAMS = [
             "https://httpbin.org/post",
             data=b"foo",
         ),
-        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        # urllib adds a form-encoded content-type to data sent without one
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'foo' https://httpbin.org/post",
         id="TEXT",
     ),
     pytest.param(
@@ -1526,7 +1502,7 @@ _URLLIB_PARAMS = [
             "https://httpbin.org/post",
             data=b"\xff\xfe\x81binary",
         ),
-        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        r"curl -X POST -H 'content-type: application/x-www-form-urlencoded' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
         id="BINARY",
     ),
     pytest.param(
@@ -1556,7 +1532,7 @@ def test_urllib_streaming_body_is_dropped() -> None:
     # urllib accepts an iterable body too; it has no textual form a shell could
     # run, so the command carries no -d while the method is still inferred POST
     req = urllib.request.Request("https://httpbin.org/post", data=iter([b"chunk"]))
-    assert to_curl(req) == "curl -X POST https://httpbin.org/post"
+    assert to_curl(req) == "curl -X POST -H 'content-type: application/x-www-form-urlencoded' https://httpbin.org/post"
 
 
 def test_urllib_unredirected_headers_are_rendered() -> None:
@@ -1848,3 +1824,349 @@ def test_to_curl_multipart_part_not_utf8(
         data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
     ).prepare()
     assert f" {expected} " in to_curl(req)
+
+
+def _starlette_request(
+    path: str,
+    raw_path: bytes | None,
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> fastapi.Request:
+    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "path": path,
+        "query_string": b"x=1",
+        "headers": [(b"host", b"testserver"), *(headers or [])],
+    }
+    if raw_path is not None:
+        scope["raw_path"] = raw_path
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return fastapi.Request(scope, receive)
+
+
+@pytest.mark.parametrize(
+    "path, raw_path, expected",
+    [
+        # a space in the decoded path is a url curl rejects
+        pytest.param("/a b", b"/a%20b", "http://testserver/a%20b?x=1", id="SPACE"),
+        # an encoded /, ? or # comes back decoded as another route, a query or a fragment
+        pytest.param("/a/b", b"/a%2Fb", "http://testserver/a%2Fb?x=1", id="SLASH"),
+        pytest.param("/a?b", b"/a%3Fb", "http://testserver/a%3Fb?x=1", id="QUESTION MARK"),
+        pytest.param("/a#b", b"/a%23b", "http://testserver/a%23b?x=1", id="HASH"),
+        # raw_path is optional in the ASGI spec
+        pytest.param("/a", None, "http://testserver/a?x=1", id="NO RAW PATH"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_starlette_raw_path(
+    path: str,
+    raw_path: bytes | None,
+    expected: str,
+) -> None:
+    command = await to_curl_async(_starlette_request(path, raw_path))
+    assert command == f"curl -H 'host: testserver' '{expected}'"
+
+
+def test_werkzeug_raw_uri() -> None:
+    # werkzeug rebuilds the url from the decoded PATH_INFO, where an encoded / is a separator
+    request = _werkzeug_request(path="/a%2Fb", query_string="x=1")
+    assert to_curl(request) == "curl -H 'host: httpbin.org' 'https://httpbin.org/a%2Fb?x=1'"
+
+
+@pytest.mark.parametrize(
+    "extra, expected",
+    [
+        pytest.param({"RAW_URI": "/a%2Fb?x=1"}, "http://testserver/a%2Fb?x=1", id="RAW_URI"),
+        pytest.param({"REQUEST_URI": "/a%2Fb?x=1"}, "http://testserver/a%2Fb?x=1", id="REQUEST_URI"),
+        # the decoded path is all django has without either, so the %2F is gone
+        pytest.param({}, "http://testserver/a/b?x=1", id="NEITHER"),
+        # an absolute-form target is not trusted to be the path
+        pytest.param({"RAW_URI": "http://evil/x"}, "http://testserver/a/b?x=1", id="ABSOLUTE FORM"),
+    ],
+)
+def test_django_raw_uri(
+    extra: dict[str, str],
+    expected: str,
+) -> None:
+    request = RequestFactory().get("/a%2Fb?x=1", **extra)
+    assert f" '{expected}'" in to_curl(request)
+
+
+@pytest.mark.asyncio
+async def test_starlette_repeated_headers() -> None:
+    # dict() kept only the first value of each: the second x-a and the second cookie were lost
+    request = _starlette_request(
+        "/",
+        b"/",
+        [(b"x-a", b"1"), (b"x-a", b"2"), (b"cookie", b"a=1"), (b"cookie", b"b=2")],
+    )
+    command = await to_curl_async(request)
+    assert command == "curl -b 'a=1; b=2' -H 'host: testserver' -H 'x-a: 1, 2' 'http://testserver/?x=1'"
+
+
+def _tornado_headers(
+    pairs: list[tuple[str, str]],
+) -> tornado.httputil.HTTPHeaders:
+    headers = tornado.httputil.HTTPHeaders()
+    for name, value in pairs:
+        headers.add(name, value)
+    return headers
+
+
+@pytest.mark.parametrize(
+    "req",
+    [
+        # httpx joins a repeated header with ", " in items(), the cookies included
+        pytest.param(
+            httpx.Request(
+                "GET", "http://h/", headers=[("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]
+            ),
+            id="HTTPX",
+        ),
+        pytest.param(
+            httpx2.Request(
+                "GET", "http://h/", headers=[("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]
+            ),
+            id="HTTPX2",
+        ),
+        # tornado joins them with ","
+        pytest.param(
+            tornado.httpclient.HTTPRequest(
+                "http://h/",
+                headers=_tornado_headers([("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]),
+            ),
+            id="TORNADO",
+        ),
+    ],
+)
+def test_to_curl_repeated_headers(
+    req: object,
+) -> None:
+    command = to_curl(req)
+    # a comma between the cookies runs them together: a server reads cookie a as "1, b=2"
+    assert " -b 'a=1; b=2' " in command
+    assert " -H 'x-a: 1, 2' " in command
+
+
+def test_tornado_server_repeated_headers() -> None:
+    headers = _tornado_headers([("Host", "h"), ("Cookie", "a=1"), ("Cookie", "b=2")])
+    request = tornado.httputil.HTTPServerRequest(method="GET", uri="/", headers=headers)
+    assert to_curl(request) == "curl -b 'a=1; b=2' -H 'host: h' http://h/"
+
+
+@pytest.mark.parametrize(
+    "url, globoff",
+    [
+        # curl expands [] and {} in a url, so the command sends other requests than the one it was rendered from
+        pytest.param("http://h/p?a[]=1", True, id="BRACKETS"),
+        pytest.param("http://h/p?b={x}", True, id="BRACES"),
+        pytest.param("http://h/p?id=[1-3]", True, id="RANGE"),
+        pytest.param("http://h/p?a=1", False, id="PLAIN"),
+    ],
+)
+@pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
+def test_to_curl_url_globoff(
+    url: str,
+    globoff: bool,
+    long_options: bool,
+) -> None:
+    command = to_curl(httpx.Request("GET", url), long_options=long_options)
+    option = "--globoff" if long_options else "-g"
+    assert (f" {option} " in command) is globoff, command
+
+
+@pytest.mark.parametrize(
+    "shell, expected",
+    [
+        # curl drops a header passed with nothing after the colon, and sends it with the ; spelling
+        pytest.param("sh", " -H 'x-e;' ", id="SH"),
+        pytest.param(POWERSHELL, ' -H "x-e;" ', id="POWERSHELL"),
+    ],
+)
+def test_to_curl_empty_header_value(
+    shell: str,
+    expected: str,
+) -> None:
+    req = httpx.Request("GET", "http://h/", headers={"x-e": ""})
+    assert expected in to_curl(req, shell=shell)
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_repeated_headers() -> None:
+    # dict() kept only the first value off the multidict
+    headers = CIMultiDict([("Host", "h"), ("X-A", "1"), ("X-A", "2"), ("Cookie", "a=1"), ("Cookie", "b=2")])
+    request = make_mocked_request("GET", "/", headers=headers)
+    assert await to_curl_async(request) == "curl -b 'a=1; b=2' -H 'host: h' -H 'x-a: 1, 2' http://h/"
+
+
+def _multipart_request(
+    content_type: str,
+    body: bytes,
+) -> requests.PreparedRequest:
+    # written as it arrives on the wire, which is where the server-side adapters read it from
+    return requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": content_type},
+        data=body,
+    ).prepare()
+
+
+@pytest.mark.parametrize(
+    "content_type, expected",
+    [
+        # -F brings a boundary of its own and curl appends it to the header, so a boundary
+        # left in sent two of them
+        pytest.param("multipart/form-data; boundary=b", "multipart/form-data", id="BARE"),
+        pytest.param('multipart/form-data; boundary="b"', "multipart/form-data", id="QUOTED"),
+        pytest.param("Multipart/Form-Data; Boundary=b", "Multipart/Form-Data", id="MIXED CASE"),
+        pytest.param(
+            "multipart/form-data; boundary=b; charset=utf-8", "multipart/form-data; charset=utf-8", id="CHARSET"
+        ),
+    ],
+)
+def test_to_curl_multipart_drops_boundary_param(
+    content_type: str,
+    expected: str,
+) -> None:
+    req = _multipart_request(content_type, b'--b\r\nContent-Disposition: form-data; name="foo"\r\n\r\nbar\r\n--b--\r\n')
+    assert to_curl(req) == f"curl -X POST -H 'content-type: {expected}' -F 'foo=bar' https://httpbin.org/post"
+
+
+@pytest.mark.parametrize(
+    "disposition, expected",
+    [
+        # name=" also matched inside filename=", so a filename that came first named the field
+        pytest.param(b'form-data; filename="f.txt"; name="real"', "-F 'real=@f.txt'", id="FILENAME FIRST"),
+        pytest.param(b'form-data; name="real"; filename="f.txt"', "-F 'real=@f.txt'", id="NAME FIRST"),
+        pytest.param(b'form-data; NAME="real"', "-F 'real=v'", id="UPPERCASE PARAM"),
+        # a browser sends an empty file input this way; -F 'f=@' names a file curl cannot open
+        pytest.param(b'form-data; name="f"; filename=""', "-F 'f=;filename=\"\"'", id="EMPTY FILENAME"),
+    ],
+)
+def test_to_curl_multipart_part_params(
+    disposition: bytes,
+    expected: str,
+) -> None:
+    req = _multipart_request(
+        "multipart/form-data; boundary=b",
+        b"--b\r\nContent-Disposition: " + disposition + b"\r\n\r\nv\r\n--b--\r\n",
+    )
+    assert f" {expected} " in to_curl(req)
+
+
+def test_to_curl_multipart_part_without_name() -> None:
+    # a filename alone is not a field name either
+    req = _multipart_request(
+        "multipart/form-data; boundary=b",
+        b'--b\r\nContent-Disposition: form-data; filename="f.txt"\r\n\r\nv\r\n--b--\r\n',
+    )
+    assert " -F " not in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        # -F builds form-data only: these parts carry no field names, and the related ones were
+        # skipped one by one until the command had no body at all
+        pytest.param("multipart/related; boundary=b", id="RELATED"),
+        pytest.param("multipart/mixed; boundary=b", id="MIXED"),
+    ],
+)
+def test_to_curl_multipart_not_form_data(
+    content_type: str,
+) -> None:
+    body = b'--b\r\nContent-Type: application/json\r\n\r\n{"a": 1}\r\n--b--\r\n'
+    command = to_curl(_multipart_request(content_type, body))
+    # the body goes out as it is, with the boundary it was written with
+    assert f" -H 'content-type: {content_type}' " in command
+    assert " -d '--b\r\nContent-Type: application/json\r\n\r\n{\"a\": 1}\r\n--b--\r\n' " in command
+
+
+@pytest.mark.parametrize(
+    "req",
+    [
+        pytest.param(httpx.Request("GET", "https://httpbin.org/get", content=b"abc"), id="HTTPX"),
+        pytest.param(requests.Request("GET", "https://httpbin.org/get", data="abc").prepare(), id="REQUESTS"),
+        pytest.param(urllib.request.Request("https://httpbin.org/get", data=b"abc", method="GET"), id="URLLIB"),
+    ],
+)
+def test_to_curl_get_with_body(
+    req: object,
+) -> None:
+    # a body makes curl send POST, so the GET has to be named
+    assert to_curl(req).startswith("curl -X GET ")
+
+
+@pytest.mark.parametrize(
+    "long_options, expected",
+    [
+        pytest.param(False, "curl -I https://httpbin.org/get", id="SHORT"),
+        pytest.param(True, "curl --head https://httpbin.org/get", id="LONG"),
+    ],
+)
+def test_to_curl_head(
+    long_options: bool,
+    expected: str,
+) -> None:
+    # -X HEAD keeps curl waiting for the response body a HEAD response does not have
+    req = requests.Request("HEAD", "https://httpbin.org/get").prepare()
+    assert to_curl(req, long_options=long_options) == expected
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        pytest.param(
+            dict(auth_username="u", auth_password="p"),
+            "curl -H 'authorization: Basic dTpw' https://h/x",
+            id="BASIC AUTH",
+        ),
+        pytest.param(
+            dict(auth_username="u", auth_password="p", auth_mode="basic", headers={"Authorization": "old"}),
+            "curl -H 'authorization: Basic dTpw' https://h/x",
+            id="AUTH OVER HEADER",
+        ),
+        pytest.param(dict(user_agent="UA/1"), "curl -H 'user-agent: UA/1' https://h/x", id="USER AGENT"),
+        pytest.param(dict(decompress_response=True), "curl -H 'accept-encoding: gzip' https://h/x", id="DECOMPRESS"),
+        # a None attribute takes the client's default, which the request cannot know
+        pytest.param(dict(), "curl https://h/x", id="DEFAULTS"),
+    ],
+)
+def test_tornado_send_time_headers(
+    kwargs: dict[str, Any],
+    expected: str,
+) -> None:
+    # simple_httpclient sets these headers from the request's attributes when it sends it
+    assert to_curl(tornado.httpclient.HTTPRequest("https://h/x", **kwargs)) == expected
+
+
+def test_django_disallowed_host() -> None:
+    # build_absolute_uri() raises DisallowedHost for a host outside ALLOWED_HOSTS, which made
+    # a logger that renders the request before django answers 400 fail on its own
+    request = RequestFactory().get("/a?x=1", HTTP_HOST="evil.example")
+    assert to_curl(request) == "curl -H 'host: evil.example' 'http://evil.example/a?x=1'"
+
+
+def test_werkzeug_form_parsed_first() -> None:
+    # parsing the form reads the stream to the end, and the body used to vanish from the command
+    request = _werkzeug_request(path="/post", method="POST", data={"a": "1 2", "b": "é"})
+    _ = request.form
+    assert to_curl(request) == (
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/x-www-form-urlencoded' "
+        "-d 'a=1+2&b=%C3%A9' https://httpbin.org/post"
+    )
+
+
+def test_werkzeug_multipart_parsed_first() -> None:
+    # the files went with the stream: nothing recoverable, so no -d, as with django
+    request = _werkzeug_request(path="/post", method="POST", data={"a": "1", "f": (io.BytesIO(b"x"), "f.txt")})
+    _ = request.form
+    assert " -d " not in to_curl(request)
+    assert " -F " not in to_curl(request)
