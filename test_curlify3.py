@@ -984,10 +984,6 @@ async def test_to_curl_async_unknown_shell() -> None:
         await to_curl_async(req, shell="fish")
 
 
-def _starlette_request() -> fastapi.Request:
-    return fastapi.Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
-
-
 def test_to_curl_unknown_request_names_the_type() -> None:
     with pytest.raises(UnsupportedRequestError) as exc_info:
         to_curl(object())
@@ -1010,10 +1006,34 @@ async def test_to_curl_async_unknown_request_names_the_type() -> None:
     assert str(exc_info.value) == "unknown request object: builtins.object"
 
 
+def _starlette_request(
+    path: str,
+    raw_path: bytes | None,
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> fastapi.Request:
+    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "path": path,
+        "query_string": b"x=1",
+        "headers": [(b"host", b"testserver"), *(headers or [])],
+    }
+    if raw_path is not None:
+        scope["raw_path"] = raw_path
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return fastapi.Request(scope, receive)
+
+
 @pytest.mark.parametrize(
     ("req", "type_name"),
     [
-        (_starlette_request(), "starlette.requests.Request"),
+        (_starlette_request("/", b"/"), "starlette.requests.Request"),
         (make_mocked_request("GET", "/"), "aiohttp.web_request.Request"),
     ],
 )
@@ -1948,30 +1968,6 @@ def test_to_curl_multipart_part_not_utf8(
         data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
     ).prepare()
     assert f" {expected} " in to_curl(req)
-
-
-def _starlette_request(
-    path: str,
-    raw_path: bytes | None,
-    headers: list[tuple[bytes, bytes]] | None = None,
-) -> fastapi.Request:
-    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
-    scope: dict[str, Any] = {
-        "type": "http",
-        "method": "GET",
-        "scheme": "http",
-        "server": ("testserver", 80),
-        "path": path,
-        "query_string": b"x=1",
-        "headers": [(b"host", b"testserver"), *(headers or [])],
-    }
-    if raw_path is not None:
-        scope["raw_path"] = raw_path
-
-    async def receive() -> dict[str, Any]:
-        return {"type": "http.request", "body": b"", "more_body": False}
-
-    return fastapi.Request(scope, receive)
 
 
 @pytest.mark.parametrize(
