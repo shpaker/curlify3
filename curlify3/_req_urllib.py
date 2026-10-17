@@ -16,11 +16,12 @@ when it carries data, GET otherwise.
     # curl -X POST -H 'content-type: application/json' -d '{"hello": "world"}' https://httpbin.org/post
 """
 
+from collections.abc import Iterable
 from typing import Any
 from urllib.request import Request
 
-from curlify3._base import BaseRequestData, _header_value
-from curlify3._types import Body, Headers
+from curlify3._base import BaseRequestData
+from curlify3._types import Body
 
 
 # Request falls outside the RawRequest protocol — there is no url attribute
@@ -43,24 +44,12 @@ class UrllibRequest(BaseRequestData[Any]):
         # a request carrying data and GET otherwise, and the command must match
         return self._request.get_method()
 
-    @property
-    def headers(
+    def _header_items(
         self,
-    ) -> Headers:
+    ) -> Iterable[tuple[Any, Any]]:
         # headers live in a plain case-sensitive dict under capitalize()d keys,
         # with the unredirected ones kept apart; header_items() merges both
-        headers = {name.lower(): _header_value(value) for name, value in self._request.header_items()}
-        headers.pop("cookie", None)
-        return headers
-
-    @property
-    def cookies(
-        self,
-    ) -> str | None:
-        for name, value in self._request.header_items():
-            if name.lower() == "cookie":
-                return _header_value(value)
-        return None
+        return self._request.header_items()
 
     def body(
         self,

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- The url of a starlette / FastAPI request keeps its path as it arrived ([#48](https://github.com/shpaker/curlify3/issues/48)). `request.url` is built from the percent-decoded path, so `%20` gave a url curl rejects and `%2F`, `%3F`, `%23` came back as `/`, `?`, `#` — another route. The path now comes from the scope's `raw_path`. werkzeug / flask and django take it from `RAW_URI` / `REQUEST_URI` when the server sets them (gunicorn, uwsgi, werkzeug's own), since `PATH_INFO` is decoded too.
+- A url holding `[`, `]`, `{` or `}` is rendered with `-g` / `--globoff` ([#48](https://github.com/shpaker/curlify3/issues/48)). curl expanded them as a glob: `{x}` lost its braces, `[1-3]` went out as three requests.
+- A repeated header keeps every value ([#48](https://github.com/shpaker/curlify3/issues/48)). starlette and aiohttp kept only the first one; it is joined with `, ` now, and a repeated `Cookie` with `; ` — httpx, werkzeug and tornado joined cookies with a comma, which a server reads as part of the first cookie's value.
+- A header with an empty value is rendered as `-H 'name;'` ([#48](https://github.com/shpaker/curlify3/issues/48)). curl drops `-H 'name: '` without sending it.
+
 ## 0.14 (2026-10-16)
 
 ### Added

@@ -193,9 +193,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method is inferred the way urllib sends it |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
 | `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
-| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it |
-| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d` |
-| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base |
+| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it; the path comes from `raw_path`, still encoded |
+| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d`; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them |
+| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them |
 | `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side |
 | `tornado` | `tornado.httputil.HTTPServerRequest` | ✅ | — | Server-side, body already read |
 
@@ -209,8 +209,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
 | File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
-| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it) |
-| Headers | `-H 'name: value'` (lowercased) |
+| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it; repeated `Cookie` headers joined with `; `) |
+| Headers | `-H 'name: value'` (lowercased; a repeated header joined with `, `, an empty one as `-H 'name;'`) |
+| Url with `[]` or `{}` | `-g`, so `curl` does not expand them as a glob |
 
 `Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess.
 
