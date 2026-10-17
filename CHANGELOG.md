@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- An unsupported request object is reported by type, with the fix when there is one ([#33](https://github.com/shpaker/curlify3/issues/33)). The bare `unknown request object` now carries the `module.qualname` of what was passed, and when the other entrypoint accepts the object — a starlette, FastAPI or aiohttp request handed to the sync `to_curl()`, or a `requests.PreparedRequest` to `to_curl_async()` — the message says to use that one instead. The exception is the new `curlify3.UnsupportedRequestError`, a subclass of both `TypeError` and `ValueError`: an unsupported type is a type error, and `except ValueError` written against earlier releases keeps catching it. The message still starts with `unknown request object`.
+
 ## 0.14 (2026-10-16)
 
 ### Added

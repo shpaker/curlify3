@@ -372,7 +372,11 @@ def to_curl(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
-    Raises ValueError if the request type or the shell value is not recognized, if
+    Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
+    if no adapter accepts the request; the message names its type, and points to
+    to_curl_async() when that one accepts it instead.
+
+    Raises ValueError if the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
     a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
@@ -419,7 +423,11 @@ async def to_curl_async(
     exclude then subtracts from what is left. Cookie counts as a header, so a
     filter that drops it drops -b too. Both default to rendering every header.
 
-    Raises ValueError if the request type or the shell value is not recognized, if
+    Raises UnsupportedRequestError — a subclass of both TypeError and ValueError —
+    if no adapter accepts the request; the message names its type, and points to
+    to_curl() when that one accepts it instead.
+
+    Raises ValueError if the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
     field value — is not valid UTF-8 and shell="powershell", or if either contains
     a NUL byte. Raises TypeError if include_headers or exclude_headers is a str

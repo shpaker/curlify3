@@ -180,7 +180,13 @@ Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.w
 
 `shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers).
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
+Both functions raise `curlify3.UnsupportedRequestError` if no adapter accepts the request object. It subclasses both `TypeError` and `ValueError`, so `except ValueError` written against earlier releases still catches it. The message names the type that was passed, and when the other entrypoint accepts it — a starlette request handed to `to_curl()`, say — it says to use that one instead:
+
+```
+unknown request object: starlette.requests.Request, it is accepted by to_curl_async(), use that instead
+```
+
+They raise `ValueError` if the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
 
 ## Supported request objects
 
