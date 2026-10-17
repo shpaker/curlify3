@@ -181,7 +181,13 @@ Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.w
 
 `shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers).
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), if any value contains a line break and `shell="powershell"`, or if the body or a multipart field value contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
+Both functions raise `curlify3.UnsupportedRequestError` if no adapter accepts the request object. It subclasses both `TypeError` and `ValueError`, so `except ValueError` written against earlier releases still catches it. The message names the type that was passed, and when the other entrypoint accepts it — a starlette request handed to `to_curl()`, say — it says to use that one instead:
+
+```
+unknown request object: starlette.requests.Request, it is accepted by to_curl_async(), use that instead
+```
+
+They raise `ValueError` if the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), if any value contains a line break and `shell="powershell"`, or if the body or a multipart field value contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
 
 ## Supported request objects
 
@@ -191,13 +197,13 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | `niquests` | `PreparedRequest` | ✅ | — | Pass `Request(...).prepare()`; HTTP/2 and HTTP/3 live on the transport, so no `--http2` |
 | `httpx` | `httpx.Request` | ✅ | ✅ | |
 | `httpx2` | `httpx2.Request` | ✅ | ✅ | Adds `--http2` |
-| `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method is inferred the way urllib sends it |
+| `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method and content-type are inferred the way urllib sends them |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
 | `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
-| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it |
-| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d` |
-| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base |
-| `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side |
+| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it; the path comes from `raw_path`, still encoded |
+| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d`; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them; a host outside `ALLOWED_HOSTS` is rendered rather than raised |
+| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them; a form parsed before rendering is encoded again, a parsed multipart one renders without `-d` |
+| `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side; renders the headers the client derives from `auth_username`, `user_agent` and `decompress_response` |
 | `tornado` | `tornado.httputil.HTTPServerRequest` | ✅ | — | Server-side, body already read |
 
 ## Payload handling
@@ -207,15 +213,20 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Plain text | `-d 'text'` |
 | JSON | `-d '{"k":"v"}'` with `content-type: application/json` |
 | Form-encoded | `-d 'k=v&k2=v2'` with `content-type: application/x-www-form-urlencoded` |
-| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts |
+| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts; the `boundary` parameter is left out of `-H 'content-type: …'`, since `-F` brings its own |
+| Empty file input | `-F 'field=;filename=""'` for a part with `filename=""` |
+| Other multipart | `multipart/related`, `multipart/mixed` and the rest go out as the body they are, with their own boundary |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
 | File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
 | Field `-F` would parse | `--form-string 'field=x;type=y'` when a value holds a `;` or starts with `"` |
 | Filename `-F` would split | `-F 'f=@"a;b.txt"'` when a filename holds `;`, `,`, `"` or `\` |
-| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it); `-H 'cookie: …'` when the value has no `=` |
-| Headers | `-H 'name: value'` (lowercased) |
+| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it; repeated `Cookie` headers joined with `; `); `-H 'cookie: …'` when the value has no `=` |
+| Headers | `-H 'name: value'` (lowercased; a repeated header joined with `, `, an empty one as `-H 'name;'`) |
+| Url with `[]` or `{}` | `-g`, so `curl` does not expand them as a glob |
 
-`Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess.
+`Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess — except where the client itself sends `application/x-www-form-urlencoded` (`urllib.request`, and `tornado` for a POST), which is what the command carries then.
+
+The method follows what `curl` would send otherwise: a GET that carries a body is spelled `-X GET`, since a body alone makes `curl` send POST, and a HEAD is spelled `-I`, since `-X HEAD` leaves `curl` waiting for a response body that never comes.
 
 A body that does not decode as UTF-8 is rendered as an ANSI-C quoted literal, with only the bytes that have to be escaped escaped — so a mis-encoded text body stays readable as `--data-raw $'caf\xe9'`. Two things follow from that:
 

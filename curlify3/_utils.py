@@ -101,25 +101,54 @@ with suppress(ImportError):
 _DataT = TypeVar("_DataT")
 
 
+class UnsupportedRequestError(TypeError, ValueError):
+    """Raised when no adapter accepts the request object.
+
+    A TypeError by nature, and a ValueError for the callers written against the
+    releases that raised a plain ValueError here.
+    """
+
+
+def _accepts(
+    request: object,
+    request_data_classes: Sequence[Callable[[Any], object]],
+) -> bool:
+    for _cls in request_data_classes:
+        try:
+            _cls(request)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
 def _find_request_data_obj(
     request: object,
     request_data_classes: Sequence[Callable[[Any], _DataT]],
+    other_classes: Sequence[Callable[[Any], object]],
+    other_entrypoint: str,
 ) -> _DataT:
     for _cls in request_data_classes:
         try:
             return _cls(request)
         except ValueError:
             continue
-    raise ValueError('unknown request object')
+    # the adapters only run isinstance on construction, so asking the other
+    # registry is cheap — and it is the mistake worth naming: a starlette or
+    # aiohttp request handed to the sync entrypoint, or the other way round
+    message = f"unknown request object: {type(request).__module__}.{type(request).__qualname__}"
+    if _accepts(request, other_classes):
+        message += f", it is accepted by {other_entrypoint}, use that instead"
+    raise UnsupportedRequestError(message)
 
 
 def make_request_obj(
     request: object,
 ) -> RequestData:
-    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES)
+    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES, _REQUEST_DATA_CLASSES_ASYNC, "to_curl_async()")
 
 
 def make_request_obj_async(
     request: object,
 ) -> AsyncRequestData:
-    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC)
+    return _find_request_data_obj(request, _REQUEST_DATA_CLASSES_ASYNC, _REQUEST_DATA_CLASSES, "to_curl()")
