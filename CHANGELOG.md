@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The PyPI summary is the README's first sentence now instead of "yet another library to convert request object to curl command", and the package declares keywords and links to its documentation, changelog and issue tracker ([#34](https://github.com/shpaker/curlify3/issues/34)).
+
 ## 0.14 (2026-10-16)
 
 ### Added

@@ -1,8 +1,20 @@
 [project]
 name = "curlify3"
 version = "0.1.0"
-description = "yet another library to convert request object to curl command"
+description = "Convert request objects from popular Python HTTP libraries into ready-to-run curl commands"
 readme = "README.md"
+keywords = [
+    "curl",
+    "http",
+    "requests",
+    "httpx",
+    "aiohttp",
+    "fastapi",
+    "django",
+    "flask",
+    "debugging",
+    "logging",
+]
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -28,6 +40,9 @@ classifiers = [
 
 [project.urls]
 Repository = "https://github.com/shpaker/curlify3"
+Documentation = "https://github.com/shpaker/curlify3#readme"
+Changelog = "https://github.com/shpaker/curlify3/blob/main/CHANGELOG.md"
+Issues = "https://github.com/shpaker/curlify3/issues"
 
 [dependency-groups]
 dev = [
