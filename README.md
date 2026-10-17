@@ -172,15 +172,15 @@ Library    curlify3.robot.CurlifyLibrary    exclude_headers=${{["user-agent", "a
 
 *** Test Cases ***
 Render One Request
-    ${resp}=    GET    https://httpbin.org/get
-    ${cmd}=    To Curl    ${resp}    pretty=True
+    ${resp}=       GET        https://httpbin.org/get
+    ${cmd}=        To Curl    ${resp}    pretty=True
     Log As Curl    ${resp}    level=DEBUG
 
 Log Every Request Of A Session
-    Create Session    httpbin    https://httpbin.org
-    Enable Curl Logging    httpbin
-    GET On Session    httpbin    /get
-    POST On Session    httpbin    /post    json=${{ {"date": "2026-08-10"} }}
+    Create Session          httpbin    https://httpbin.org
+    Enable Curl Logging     httpbin
+    GET On Session          httpbin    /get
+    POST On Session         httpbin    /post    json=${{ {"date": "2026-08-10"} }}
     Disable Curl Logging    httpbin
 ```
 

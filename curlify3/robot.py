@@ -6,13 +6,13 @@
 
     *** Test Cases ***
     Log One Request
-        ${resp}=    GET    https://httpbin.org/get
+        ${resp}=       GET    https://httpbin.org/get
         Log As Curl    ${resp}
 
     Log Every Request Of A Session
-        Create Session    httpbin    https://httpbin.org
+        Create Session         httpbin    https://httpbin.org
         Enable Curl Logging    httpbin
-        GET On Session    httpbin    /get
+        GET On Session         httpbin    /get
 
 Needs robotframework, installed with the robot extra: pip install curlify3[robot].
 The keywords take every request object to_curl() accepts, and anything carrying
@@ -164,7 +164,7 @@ class CurlifyLibrary:
         Requests sent with the session-less keywords (``GET``, ``POST`` ...) are not
         covered: pass their response to `Log As Curl` instead.
 
-        | Create Session    api    https://api.example.com
+        | Create Session         api    https://api.example.com
         | Enable Curl Logging    api    exclude_headers=${{["user-agent"]}}
         """
         hooks = _response_hooks(alias)
