@@ -29,7 +29,7 @@ from django.test import RequestFactory
 from multidict import CIMultiDict
 from pytest_aiohttp.plugin import AiohttpClient
 
-from curlify3 import POWERSHELL, to_curl, to_curl_async
+from curlify3 import POWERSHELL, UnsupportedRequestError, to_curl, to_curl_async
 from curlify3._curl import quote_powershell, quote_sh, quote_sh_bytes, quote_sh_word
 
 # imported directly so a broken adapter module fails collection loudly instead
@@ -984,6 +984,80 @@ async def test_to_curl_async_unknown_shell() -> None:
         await to_curl_async(req, shell="fish")
 
 
+def test_to_curl_unknown_request_names_the_type() -> None:
+    with pytest.raises(UnsupportedRequestError) as exc_info:
+        to_curl(object())
+    assert str(exc_info.value) == "unknown request object: builtins.object"
+
+
+def test_unknown_request_error_is_type_and_value_error() -> None:
+    # a TypeError by nature, and still a ValueError for the callers written
+    # against the releases that raised a plain one
+    assert issubclass(UnsupportedRequestError, TypeError)
+    assert issubclass(UnsupportedRequestError, ValueError)
+    with pytest.raises(ValueError, match="unknown request object"):
+        to_curl(object())
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_unknown_request_names_the_type() -> None:
+    with pytest.raises(UnsupportedRequestError) as exc_info:
+        await to_curl_async(object())
+    assert str(exc_info.value) == "unknown request object: builtins.object"
+
+
+def _starlette_request(
+    path: str,
+    raw_path: bytes | None,
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> fastapi.Request:
+    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "path": path,
+        "query_string": b"x=1",
+        "headers": [(b"host", b"testserver"), *(headers or [])],
+    }
+    if raw_path is not None:
+        scope["raw_path"] = raw_path
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return fastapi.Request(scope, receive)
+
+
+@pytest.mark.parametrize(
+    ("req", "type_name"),
+    [
+        (_starlette_request("/", b"/"), "starlette.requests.Request"),
+        (make_mocked_request("GET", "/"), "aiohttp.web_request.Request"),
+    ],
+)
+def test_to_curl_points_async_requests_to_to_curl_async(
+    req: object,
+    type_name: str,
+) -> None:
+    with pytest.raises(UnsupportedRequestError) as exc_info:
+        to_curl(req)
+    assert str(exc_info.value) == (
+        f"unknown request object: {type_name}, it is accepted by to_curl_async(), use that instead"
+    )
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_points_sync_requests_to_to_curl() -> None:
+    req = requests.Request(method="GET", url="https://httpbin.org/get").prepare()
+    with pytest.raises(UnsupportedRequestError) as exc_info:
+        await to_curl_async(req)
+    assert str(exc_info.value) == (
+        "unknown request object: requests.models.PreparedRequest, it is accepted by to_curl(), use that instead"
+    )
+
+
 @pytest.mark.parametrize(
     "req, expected",
     [
@@ -1770,30 +1844,6 @@ def test_to_curl_multipart_part_not_utf8(
         data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
     ).prepare()
     assert f" {expected} " in to_curl(req)
-
-
-def _starlette_request(
-    path: str,
-    raw_path: bytes | None,
-    headers: list[tuple[bytes, bytes]] | None = None,
-) -> fastapi.Request:
-    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
-    scope: dict[str, Any] = {
-        "type": "http",
-        "method": "GET",
-        "scheme": "http",
-        "server": ("testserver", 80),
-        "path": path,
-        "query_string": b"x=1",
-        "headers": [(b"host", b"testserver"), *(headers or [])],
-    }
-    if raw_path is not None:
-        scope["raw_path"] = raw_path
-
-    async def receive() -> dict[str, Any]:
-        return {"type": "http.request", "body": b"", "more_body": False}
-
-    return fastapi.Request(scope, receive)
 
 
 @pytest.mark.parametrize(
