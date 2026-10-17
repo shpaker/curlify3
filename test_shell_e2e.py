@@ -38,6 +38,7 @@ def capture_server() -> Iterator[CaptureServer]:
                 {
                     "method": self.command,
                     "path": self.path,
+                    "cookie": self.headers.get("cookie"),
                     "body": self.rfile.read(length),
                 }
             )
@@ -243,6 +244,72 @@ def test_sh_multipart_field_file_reference_e2e(
     # what matters is that the field carries the reference itself and not the file behind it
     assert value.encode() in body, body
     assert b"SECRET-FILE-CONTENT" not in body, body
+
+
+def run_sh(
+    command: str,
+    tmp_path: pathlib.Path,
+    captured: list[dict[str, Any]],
+) -> bytes:
+    # run from tmp_path, where a file part's relative filename resolves
+    script_path = tmp_path / "cmd.sh"
+    script_path.write_text(command, encoding="utf-8")
+    completed = subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        timeout=SUBPROCESS_TIMEOUT,
+        cwd=tmp_path,
+    )
+    debug = (completed.returncode, completed.stdout, completed.stderr)
+    assert completed.returncode == 0, debug
+    assert len(captured) == 1, (captured, debug)
+    return captured[0]["body"]
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_multipart_field_headers_attribute_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # -F reads ;headers=@file as a file to load the part headers from, so the secret would
+    # travel in the part headers rather than in the value
+    base_url, captured = capture_server
+    secret = write_secret(tmp_path)
+    value = f"x;headers=@{secret}"
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"field": (None, value)})
+    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    assert value.encode() in body, body
+    assert b"SECRET-FILE-CONTENT" not in body, body
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+@pytest.mark.parametrize("filename", ["a;b.txt", "a,b.txt"], ids=["SEMICOLON", "COMMA"])
+def test_sh_multipart_filename_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+    filename: str,
+) -> None:
+    # a file part sends the local file of that name, so it has to exist next to the command
+    base_url, captured = capture_server
+    (tmp_path / filename).write_bytes(b"FILE-CONTENT")
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"f": (filename, b"FILE-CONTENT")})
+    body = run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    assert f'filename="{filename}"'.encode() in body, body
+    assert b"FILE-CONTENT" in body, body
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_cookie_file_reference_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # -b reads a value without an = as a cookie file and sends the cookies stored in it
+    base_url, captured = capture_server
+    jar = tmp_path / "jar.txt"
+    jar.write_text("127.0.0.1\tFALSE\t/\tFALSE\t0\tsecretname\tSECRET-COOKIE\n", encoding="utf-8")
+    req = httpx.Request(method="GET", url=base_url + "/get", headers={"cookie": str(jar)})
+    run_sh(to_curl(req, shell=SH), tmp_path, captured)
+    assert captured[0]["cookie"] == str(jar)
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
