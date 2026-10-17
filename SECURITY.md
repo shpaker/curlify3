@@ -19,7 +19,7 @@ Please report privately through [GitHub security advisories](https://github.com/
 Out of scope:
 
 - Secrets appearing in the rendered command. The command reproduces the request, credentials included, unless asked otherwise: mask them with `mask_headers` (`SENSITIVE_HEADERS` covers the usual ones) or leave them out with `exclude_headers`. Secrets in the url or the body are printed as they are.
-- `%NAME%` expansion under `shell="powershell"` and the other dialect limits documented in the README.
+- `%NAME%` expansion under `shell="powershell"` and the other dialect limits documented in the [documentation](https://shpaker.github.io/curlify3/guide/powershell.html).
 - Bugs in `curl`, in a shell, or in the HTTP library an adapter wraps — unless `curlify3` turns that library's output into an unsafe command.
 
 ## What to expect

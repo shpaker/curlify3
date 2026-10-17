@@ -4,16 +4,17 @@ Thanks for helping out. Security issues are not reported here — see [SECURITY.
 
 ## Setup
 
-The tooling is described in the README's [Development](README.md#development) section. In short:
+The tooling is described in the [Development](https://shpaker.github.io/curlify3/development.html) page of the documentation. In short:
 
 ```sh
 uv sync --group dev
 just tests   # pytest
 just lint    # ruff format --check, ruff check, ty check
 just fmt     # ruff check --fix, then ruff format
+just docs    # sphinx-build, warnings as errors
 ```
 
-`just lint` and `just tests` are what CI runs, so a pull request that passes both locally should pass there too. The PowerShell end-to-end tests run only on Windows; CI covers them.
+`just lint`, `just tests` and `just docs` are what CI runs, so a pull request that passes both locally should pass there too. The PowerShell end-to-end tests run only on Windows; CI covers them.
 
 ## Conventions
 
@@ -32,11 +33,11 @@ just fmt     # ruff check --fix, then ruff format
 
 1. A module `curlify3/_req_<library>.py` with a docstring that carries a usage example, following the existing ones.
 2. Registration in `curlify3/_utils.py` under `suppress(ImportError)`, so the package keeps zero runtime dependencies. The first adapter that accepts a request wins, so a more specific type goes before the one it could be mistaken for.
-3. The library in the `dev` dependency group, tests, and rows in the README's supported-request-objects and comparison tables.
+3. The library in the `dev` dependency group, tests, and the library's row and section in `docs/adapters.md` and its row in `docs/comparison.md`.
 
 ## Changelog
 
-Every user-visible change gets an entry in [CHANGELOG.md](CHANGELOG.md), under `Added`, `Changed` or `Fixed` at the top. Describe the behavior a user sees, not the diff, and link the issue. Changes that do not reach the package (CI, docs, tests) need no entry.
+Every user-visible change gets an entry in [CHANGELOG.md](CHANGELOG.md), under `Added`, `Changed` or `Fixed` at the top. Describe the behavior a user sees, not the diff, and link the issue. Changes that do not reach the package (CI, docs, tests) need no entry. A change in behavior updates the pages in `docs/` that describe it.
 
 ## Pull requests
 
