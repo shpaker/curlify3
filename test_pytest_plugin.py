@@ -282,6 +282,29 @@ def test_auth(server_url):
     assert "-H 'user-agent" not in output
 
 
+def test_mask_headers(
+    conftest: pytest.Pytester,
+) -> None:
+    conftest.makeini("[pytest]\ncurl_mask_headers =\n    authorization\n    cookie\n")
+    conftest.makepyfile(
+        """
+import httpcore
+import httpx
+
+def test_auth(server_url):
+    httpx.get(server_url + "/status/401", headers={"Authorization": "Bearer t0ken", "Cookie": "sid=s3cret"})
+    assert False
+"""
+    )
+    result = conftest.runpytest("--curl-on-failure")
+    output = result.stdout.str()
+    assert "-H 'authorization: Bearer ***'" in output
+    assert "-b 'sid=***'" in output
+    # the test source in the traceback carries the secrets, the command must not
+    assert "curl" in output
+    assert not [line for line in output.splitlines() if line.startswith("curl") and "t0ken" in line]
+
+
 def test_unrenderable_request_does_not_fail_the_test(
     conftest: pytest.Pytester,
 ) -> None:

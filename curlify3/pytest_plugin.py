@@ -81,10 +81,12 @@ class CurlCapture:
     def __init__(
         self,
         exclude_headers: list[str],
+        mask_headers: list[str],
     ) -> None:
         self.commands: list[str] = []
         self._outcomes: list[str | None] = []
         self._exclude_headers = exclude_headers
+        self._mask_headers = mask_headers
         self._restore: list[Callable[[], None]] = []
 
     def _record(
@@ -101,7 +103,11 @@ class CurlCapture:
     ) -> int:
         # a request the plugin cannot render must not fail the test that sent it
         try:
-            command = to_curl(request, exclude_headers=self._exclude_headers)
+            command = to_curl(
+                request,
+                exclude_headers=self._exclude_headers,
+                mask_headers=self._mask_headers,
+            )
         except Exception as exc:
             command = f"# not rendered: {exc!r}"
         return self._record(command)
@@ -111,7 +117,11 @@ class CurlCapture:
         request: object,
     ) -> int:
         try:
-            command = await to_curl_async(request, exclude_headers=self._exclude_headers)
+            command = await to_curl_async(
+                request,
+                exclude_headers=self._exclude_headers,
+                mask_headers=self._mask_headers,
+            )
         except Exception as exc:
             command = f"# not rendered: {exc!r}"
         return self._record(command)
@@ -224,6 +234,12 @@ def pytest_addoption(
         help="header names left out of the captured curl commands",
     )
     parser.addini(
+        "curl_mask_headers",
+        type="linelist",
+        default=[],
+        help="header names kept in the captured curl commands with *** in place of their values",
+    )
+    parser.addini(
         "curl_max_requests",
         default=str(_DEFAULT_MAX_REQUESTS),
         help=f"how many of the last requests a failure report lists, 0 for all (default {_DEFAULT_MAX_REQUESTS})",
@@ -248,7 +264,10 @@ def pytest_configure(
 def _start_capture(
     item: pytest.Item,
 ) -> CurlCapture:
-    capture = CurlCapture(exclude_headers=item.config.getini("curl_exclude_headers"))
+    capture = CurlCapture(
+        exclude_headers=item.config.getini("curl_exclude_headers"),
+        mask_headers=item.config.getini("curl_mask_headers"),
+    )
     item.stash[_CAPTURE_KEY] = capture
     capture.start()
     return capture
