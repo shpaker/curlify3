@@ -29,7 +29,7 @@ from django.test import RequestFactory
 from multidict import CIMultiDict
 from pytest_aiohttp.plugin import AiohttpClient
 
-from curlify3 import POWERSHELL, UnsupportedRequestError, to_curl, to_curl_async
+from curlify3 import POWERSHELL, SENSITIVE_HEADERS, UnsupportedRequestError, to_curl, to_curl_async
 from curlify3._curl import quote_powershell, quote_sh, quote_sh_bytes, quote_sh_word
 
 # imported directly so a broken adapter module fails collection loudly instead
@@ -1235,6 +1235,132 @@ def test_to_curl_header_filter_rejects_non_str_names() -> None:
         to_curl(_filtered_request(), include_headers=[b"accept"])  # ty: ignore[invalid-argument-type]
     with pytest.raises(TypeError, match="exclude_headers expects header names as str, got int"):
         to_curl(_filtered_request(), exclude_headers=[1])  # ty: ignore[invalid-argument-type]
+
+
+def _secret_request() -> httpx.Request:
+    return httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"Authorization": "Bearer t0ken", "X-Api-Key": "k3y", "Accept": "*/*"},
+        cookies={"sid": "s3cret", "theme": "dark"},
+        json={"foo": 1},
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param(
+            {},
+            "curl -X POST -b 'sid=s3cret; theme=dark' -H 'host: httpbin.org' -H 'authorization: Bearer t0ken' "
+            "-H 'x-api-key: k3y' -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="DEFAULT MASKS NOTHING",
+        ),
+        pytest.param(
+            {"mask_headers": ["Authorization"]},
+            "curl -X POST -b 'sid=s3cret; theme=dark' -H 'host: httpbin.org' -H 'authorization: Bearer ***' "
+            "-H 'x-api-key: k3y' -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="AUTH KEEPS SCHEME, CASE-INSENSITIVE",
+        ),
+        pytest.param(
+            {"mask_headers": ["x-api-key", "cookie"]},
+            "curl -X POST -b 'sid=***; theme=***' -H 'host: httpbin.org' -H 'authorization: Bearer t0ken' "
+            "-H 'x-api-key: ***' -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="PLAIN HEADER AND COOKIES PER PAIR",
+        ),
+        pytest.param(
+            {"mask_headers": SENSITIVE_HEADERS},
+            "curl -X POST -b 'sid=***; theme=***' -H 'host: httpbin.org' -H 'authorization: Bearer ***' "
+            "-H 'x-api-key: ***' -H 'accept: */*' -H 'content-type: application/json' "
+            "-d '{\"foo\":1}' https://httpbin.org/post",
+            id="SENSITIVE HEADERS",
+        ),
+        pytest.param(
+            {"mask_headers": ["authorization"], "exclude_headers": ["authorization", "cookie"]},
+            "curl -X POST -H 'host: httpbin.org' -H 'x-api-key: k3y' -H 'accept: */*' "
+            "-H 'content-type: application/json' -d '{\"foo\":1}' https://httpbin.org/post",
+            id="EXCLUDE WINS OVER MASK",
+        ),
+        pytest.param(
+            {"mask_headers": SENSITIVE_HEADERS, "include_headers": ["authorization"]},
+            "curl -X POST -H 'authorization: Bearer ***' -d '{\"foo\":1}' https://httpbin.org/post",
+            id="MASK AFTER INCLUDE",
+        ),
+    ],
+)
+def test_to_curl_mask_headers(
+    kwargs: dict[str, Any],
+    expected: str,
+) -> None:
+    results = to_curl(_secret_request(), **kwargs)
+    assert results == expected, results
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        pytest.param({"Authorization": "t0ken"}, "authorization: ***", id="NO SCHEME"),
+        pytest.param({"Authorization": "Basic dXNlcjpwYXNz"}, "authorization: Basic ***", id="BASIC"),
+        pytest.param({"Proxy-Authorization": "Bearer t0ken"}, "proxy-authorization: Bearer ***", id="PROXY"),
+        pytest.param({"X-Auth-Token": "Bearer t0ken"}, "x-auth-token: ***", id="SCHEME ONLY FOR AUTH HEADERS"),
+        # nothing to hide, and the ; spelling is what sends an empty header at all
+        pytest.param({"X-Api-Key": ""}, "x-api-key;", id="EMPTY VALUE"),
+    ],
+)
+def test_to_curl_mask_header_value(
+    headers: dict[str, str],
+    expected: str,
+) -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get", headers=headers)
+    results = to_curl(req, mask_headers=SENSITIVE_HEADERS)
+    assert results == f"curl -H 'host: httpbin.org' -H '{expected}' https://httpbin.org/get", results
+
+
+def test_to_curl_mask_cookie_without_value() -> None:
+    # a pair with no = has no name to keep, so the whole of it is masked
+    req = httpx.Request(method="GET", url="https://httpbin.org/get", headers={"Cookie": "sid=s3cret; flag"})
+    results = to_curl(req, mask_headers=["cookie"])
+    assert results == "curl -b 'sid=***; ***' -H 'host: httpbin.org' https://httpbin.org/get", results
+
+
+@pytest.mark.asyncio
+async def test_to_curl_async_mask_headers() -> None:
+    results = await to_curl_async(_secret_request(), mask_headers=SENSITIVE_HEADERS, include_headers=["cookie"])
+    assert results == "curl -X POST -b 'sid=***; theme=***' -d '{\"foo\":1}' https://httpbin.org/post", results
+
+
+def test_to_curl_mask_headers_powershell() -> None:
+    results = to_curl(_secret_request(), shell=POWERSHELL, mask_headers=SENSITIVE_HEADERS)
+    assert results == (
+        'curl.exe --% -X POST -b "sid=***; theme=***" -H "host: httpbin.org" -H "authorization: Bearer ***" '
+        '-H "x-api-key: ***" -H "accept: */*" -H "content-type: application/json" '
+        '-d "{\\"foo\\":1}" "https://httpbin.org/post"'
+    ), results
+
+
+def test_to_curl_mask_content_type_keeps_multipart() -> None:
+    # masking changes the printed value only: the body is still taken apart by its boundary
+    req = httpx.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        data={"field": "value"},
+        files={"upload": ("a.txt", b"hi")},
+    )
+    results = to_curl(req, mask_headers=["content-type"])
+    assert results == (
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: ***' -F 'field=value' -F 'upload=@a.txt' "
+        "https://httpbin.org/post"
+    ), results
+
+
+def test_to_curl_mask_headers_rejects_bad_names() -> None:
+    with pytest.raises(TypeError, match="mask_headers expects an iterable of header names"):
+        to_curl(_secret_request(), mask_headers="authorization")
+    with pytest.raises(TypeError, match="mask_headers expects header names as str, got bytes"):
+        to_curl(_secret_request(), mask_headers=[b"authorization"])  # ty: ignore[invalid-argument-type]
 
 
 def test_to_curl_pretty_powershell() -> None:
