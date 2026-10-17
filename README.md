@@ -150,9 +150,10 @@ print(to_curl(req, shell="powershell"))
 # curl.exe --% -X POST -H "content-type: application/json" -d "{\"date\": \"2026-08-10\"}" "https://httpbin.org/post"
 ```
 
-`curl.exe` avoids the `Invoke-WebRequest` alias, and `--%` — PowerShell's stop-parsing token — hands the rest to `curl.exe` verbatim. The token is what makes arbitrary JSON survive: without it, 5.1's argument binder re-quotes values by counting every double quote, escaped or not, and mangles the body. Two consequences worth knowing:
+`curl.exe` avoids the `Invoke-WebRequest` alias, and `--%` — PowerShell's stop-parsing token — hands the rest to `curl.exe` verbatim. The token is what makes arbitrary JSON survive: without it, 5.1's argument binder re-quotes values by counting every double quote, escaped or not, and mangles the body. Three consequences worth knowing:
 
 - `%NAME%` environment-variable references in a payload are still expanded.
+- A value holding a line break — a pretty-printed JSON body, a multi-line text field — raises `ValueError`: `--%` ends at the line break, so the next line would run as a PowerShell command of its own. Use `shell="sh"` for those.
 - The command is for PowerShell only — in `cmd`, git-bash, or WSL, `curl.exe` chokes on `--%`; use the default `shell="sh"` output there. On `pwsh` 7.2+, run `$PSNativeCommandArgumentPassing = 'Legacy'` in the session first.
 
 The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
@@ -248,7 +249,7 @@ Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.w
 
 `shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers).
 
-Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), or if either contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
+Both functions raise `ValueError` if the request type or the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), if any value contains a line break and `shell="powershell"`, or if the body or a multipart field value contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
 
 ## Supported request objects
 
@@ -277,7 +278,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
 | File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
-| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it) |
+| Field `-F` would parse | `--form-string 'field=x;type=y'` when a value holds a `;` or starts with `"` |
+| Filename `-F` would split | `-F 'f=@"a;b.txt"'` when a filename holds `;`, `,`, `"` or `\` |
+| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it); `-H 'cookie: …'` when the value has no `=` |
 | Headers | `-H 'name: value'` (lowercased) |
 
 `Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess.
@@ -298,6 +301,8 @@ print(to_curl(httpx.Request("POST", "https://example.com/", content="@/etc/passw
 ```
 
 This matters most on the server side, where the value is chosen by whoever sent the request: with `-d`, a command rendered into a log and later pasted into a terminal would read a local file of the caller's choosing and send it to the caller's own url. File *parts* keep `-F 'field=@file'`, where the `@` is the intended meaning.
+
+The same goes for the rest of what `curl` parses in those values. In a `-F` value a `;` starts an attribute — `;headers=@file` loads the part headers from a local file, `;type=` and `;filename=` change the part — and a leading `"` opens a quoted string, so such a value goes through `--form-string` as well. A filename that holds `;`, `,`, `"` or `\` is written as a quoted string, `-F 'f=@"a;b.txt"'`, which `curl` does not cut short. And `-b` reads a value without an `=` as the name of a cookie file, so a `Cookie` header that holds no `name=value` pair is rendered with `-H` instead.
 
 ## Comparison with `curlify` and `curlify2`
 
