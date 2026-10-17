@@ -71,6 +71,12 @@ dev = [
     "robotframework>=6.1",
     "robotframework-requests>=0.9",
 ]
+docs = [
+    "furo>=2024.8.6",
+    "myst-parser>=4.0",
+    "sphinx>=8.1",
+    "sphinx-copybutton>=0.5.2",
+]
 
 [build-system]
 requires = ["hatchling"]
