@@ -21,9 +21,11 @@ import werkzeug.test
 import yarl
 
 from aiohttp import web as aiohttp_web
+from aiohttp.test_utils import make_mocked_request
 from django.conf import settings as django_settings
 from django.http import HttpRequest as DjangoHttpRequest
 from django.test import RequestFactory
+from multidict import CIMultiDict
 from pytest_aiohttp.plugin import AiohttpClient
 
 from curlify3 import POWERSHELL, to_curl, to_curl_async
@@ -1574,6 +1576,14 @@ def test_to_curl_body_file_reference_powershell() -> None:
         # < is the other spelling of the same thing, and it is a --form value only
         pytest.param(b"</etc/passwd", "--form-string 'field=</etc/passwd'", id="LEADING LT"),
         pytest.param(b"user@example.com", "-F 'field=user@example.com'", id="AT INSIDE"),
+        # -F reads ;headers=@file as a local file to load the part headers from
+        pytest.param(b"x;headers=@/etc/passwd", "--form-string 'field=x;headers=@/etc/passwd'", id="HEADERS ATTR"),
+        # and ;type= / ;filename= as attributes of the part, sending a shorter value
+        pytest.param(b"x;type=text/html", "--form-string 'field=x;type=text/html'", id="TYPE ATTR"),
+        pytest.param(b"x;filename=a.txt", "--form-string 'field=x;filename=a.txt'", id="FILENAME ATTR"),
+        # a leading " opens a quoted string, whose tail -F drops
+        pytest.param(b'"lead" more', "--form-string 'field=\"lead\" more'", id="LEADING QUOTE"),
+        pytest.param(b'say "hi"', "-F 'field=say \"hi\"'", id="QUOTE INSIDE"),
     ],
 )
 def test_to_curl_multipart_field_file_reference(
@@ -1582,6 +1592,65 @@ def test_to_curl_multipart_field_file_reference(
 ) -> None:
     req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"field": (None, value)})
     assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "filename, expected",
+    [
+        pytest.param(b"a.txt", "-F 'f=@a.txt'", id="PLAIN"),
+        # -F cuts a bare filename at a ; (an attribute) or at a , (a list of files)
+        pytest.param(b"a;b.txt", "-F 'f=@\"a;b.txt\"'", id="SEMICOLON"),
+        pytest.param(b"a,b.txt", "-F 'f=@\"a,b.txt\"'", id="COMMA"),
+        # inside the quoted form a \ is escaped with a backslash, as a " would be
+        pytest.param(b"a;b\\.txt", "-F 'f=@\"a;b\\\\.txt\"'", id="BACKSLASH"),
+    ],
+)
+def test_to_curl_multipart_filename_quoting(
+    filename: bytes,
+    expected: str,
+) -> None:
+    # written as it arrives on the wire: httpx and requests would percent-encode a " themselves
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": "multipart/form-data; boundary=b"},
+        data=b'--b\r\nContent-Disposition: form-data; name="f"; filename="' + filename + b'"\r\n\r\nx\r\n--b--\r\n',
+    ).prepare()
+    assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "cookie, expected",
+    [
+        pytest.param("a=1; b=2", "-b 'a=1; b=2'", id="PAIRS"),
+        # -b reads a value without an = as the name of a cookie file to send the cookies of
+        pytest.param("/etc/cookies.txt", "-H 'cookie: /etc/cookies.txt'", id="NO EQUALS"),
+    ],
+)
+def test_to_curl_cookie_without_pair(
+    cookie: str,
+    expected: str,
+) -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get", headers={"cookie": cookie})
+    assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        # --% ends at the line break, so the line after it would run as powershell
+        pytest.param(dict(content='a"\nGet-Date; # '), id="BODY LF"),
+        pytest.param(dict(content="a\r\nb"), id="BODY CRLF"),
+        pytest.param(dict(json={"a": 1}, headers={"x-note": "a\rb"}), id="HEADER CR"),
+        pytest.param(dict(files={"note": (None, "a\nb")}), id="MULTIPART FIELD LF"),
+    ],
+)
+def test_to_curl_line_break_powershell(
+    request_kwargs: dict[str, Any],
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", **request_kwargs)
+    with pytest.raises(ValueError, match="line break"):
+        to_curl(req, shell=POWERSHELL)
 
 
 def test_to_curl_multipart_field_bytes_value() -> None:
@@ -1698,6 +1767,185 @@ def test_to_curl_multipart_part_not_utf8(
         data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
     ).prepare()
     assert f" {expected} " in to_curl(req)
+
+
+def _starlette_request(
+    path: str,
+    raw_path: bytes | None,
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> fastapi.Request:
+    # built the way uvicorn builds the scope: path percent-decoded, raw_path as it arrived
+    scope: dict[str, Any] = {
+        "type": "http",
+        "method": "GET",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "path": path,
+        "query_string": b"x=1",
+        "headers": [(b"host", b"testserver"), *(headers or [])],
+    }
+    if raw_path is not None:
+        scope["raw_path"] = raw_path
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return fastapi.Request(scope, receive)
+
+
+@pytest.mark.parametrize(
+    "path, raw_path, expected",
+    [
+        # a space in the decoded path is a url curl rejects
+        pytest.param("/a b", b"/a%20b", "http://testserver/a%20b?x=1", id="SPACE"),
+        # an encoded /, ? or # comes back decoded as another route, a query or a fragment
+        pytest.param("/a/b", b"/a%2Fb", "http://testserver/a%2Fb?x=1", id="SLASH"),
+        pytest.param("/a?b", b"/a%3Fb", "http://testserver/a%3Fb?x=1", id="QUESTION MARK"),
+        pytest.param("/a#b", b"/a%23b", "http://testserver/a%23b?x=1", id="HASH"),
+        # raw_path is optional in the ASGI spec
+        pytest.param("/a", None, "http://testserver/a?x=1", id="NO RAW PATH"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_starlette_raw_path(
+    path: str,
+    raw_path: bytes | None,
+    expected: str,
+) -> None:
+    command = await to_curl_async(_starlette_request(path, raw_path))
+    assert command == f"curl -H 'host: testserver' '{expected}'"
+
+
+def test_werkzeug_raw_uri() -> None:
+    # werkzeug rebuilds the url from the decoded PATH_INFO, where an encoded / is a separator
+    request = _werkzeug_request(path="/a%2Fb", query_string="x=1")
+    assert to_curl(request) == "curl -H 'host: httpbin.org' 'https://httpbin.org/a%2Fb?x=1'"
+
+
+@pytest.mark.parametrize(
+    "extra, expected",
+    [
+        pytest.param({"RAW_URI": "/a%2Fb?x=1"}, "http://testserver/a%2Fb?x=1", id="RAW_URI"),
+        pytest.param({"REQUEST_URI": "/a%2Fb?x=1"}, "http://testserver/a%2Fb?x=1", id="REQUEST_URI"),
+        # the decoded path is all django has without either, so the %2F is gone
+        pytest.param({}, "http://testserver/a/b?x=1", id="NEITHER"),
+        # an absolute-form target is not trusted to be the path
+        pytest.param({"RAW_URI": "http://evil/x"}, "http://testserver/a/b?x=1", id="ABSOLUTE FORM"),
+    ],
+)
+def test_django_raw_uri(
+    extra: dict[str, str],
+    expected: str,
+) -> None:
+    request = RequestFactory().get("/a%2Fb?x=1", **extra)
+    assert f" '{expected}'" in to_curl(request)
+
+
+@pytest.mark.asyncio
+async def test_starlette_repeated_headers() -> None:
+    # dict() kept only the first value of each: the second x-a and the second cookie were lost
+    request = _starlette_request(
+        "/",
+        b"/",
+        [(b"x-a", b"1"), (b"x-a", b"2"), (b"cookie", b"a=1"), (b"cookie", b"b=2")],
+    )
+    command = await to_curl_async(request)
+    assert command == "curl -b 'a=1; b=2' -H 'host: testserver' -H 'x-a: 1, 2' 'http://testserver/?x=1'"
+
+
+def _tornado_headers(
+    pairs: list[tuple[str, str]],
+) -> tornado.httputil.HTTPHeaders:
+    headers = tornado.httputil.HTTPHeaders()
+    for name, value in pairs:
+        headers.add(name, value)
+    return headers
+
+
+@pytest.mark.parametrize(
+    "req",
+    [
+        # httpx joins a repeated header with ", " in items(), the cookies included
+        pytest.param(
+            httpx.Request(
+                "GET", "http://h/", headers=[("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]
+            ),
+            id="HTTPX",
+        ),
+        pytest.param(
+            httpx2.Request(
+                "GET", "http://h/", headers=[("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]
+            ),
+            id="HTTPX2",
+        ),
+        # tornado joins them with ","
+        pytest.param(
+            tornado.httpclient.HTTPRequest(
+                "http://h/",
+                headers=_tornado_headers([("x-a", "1"), ("x-a", "2"), ("cookie", "a=1"), ("cookie", "b=2")]),
+            ),
+            id="TORNADO",
+        ),
+    ],
+)
+def test_to_curl_repeated_headers(
+    req: object,
+) -> None:
+    command = to_curl(req)
+    # a comma between the cookies runs them together: a server reads cookie a as "1, b=2"
+    assert " -b 'a=1; b=2' " in command
+    assert " -H 'x-a: 1, 2' " in command
+
+
+def test_tornado_server_repeated_headers() -> None:
+    headers = _tornado_headers([("Host", "h"), ("Cookie", "a=1"), ("Cookie", "b=2")])
+    request = tornado.httputil.HTTPServerRequest(method="GET", uri="/", headers=headers)
+    assert to_curl(request) == "curl -b 'a=1; b=2' -H 'host: h' http://h/"
+
+
+@pytest.mark.parametrize(
+    "url, globoff",
+    [
+        # curl expands [] and {} in a url, so the command sends other requests than the one it was rendered from
+        pytest.param("http://h/p?a[]=1", True, id="BRACKETS"),
+        pytest.param("http://h/p?b={x}", True, id="BRACES"),
+        pytest.param("http://h/p?id=[1-3]", True, id="RANGE"),
+        pytest.param("http://h/p?a=1", False, id="PLAIN"),
+    ],
+)
+@pytest.mark.parametrize("long_options", [False, True], ids=["short options", "long options"])
+def test_to_curl_url_globoff(
+    url: str,
+    globoff: bool,
+    long_options: bool,
+) -> None:
+    command = to_curl(httpx.Request("GET", url), long_options=long_options)
+    option = "--globoff" if long_options else "-g"
+    assert (f" {option} " in command) is globoff, command
+
+
+@pytest.mark.parametrize(
+    "shell, expected",
+    [
+        # curl drops a header passed with nothing after the colon, and sends it with the ; spelling
+        pytest.param("sh", " -H 'x-e;' ", id="SH"),
+        pytest.param(POWERSHELL, ' -H "x-e;" ', id="POWERSHELL"),
+    ],
+)
+def test_to_curl_empty_header_value(
+    shell: str,
+    expected: str,
+) -> None:
+    req = httpx.Request("GET", "http://h/", headers={"x-e": ""})
+    assert expected in to_curl(req, shell=shell)
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_repeated_headers() -> None:
+    # dict() kept only the first value off the multidict
+    headers = CIMultiDict([("Host", "h"), ("X-A", "1"), ("X-A", "2"), ("Cookie", "a=1"), ("Cookie", "b=2")])
+    request = make_mocked_request("GET", "/", headers=headers)
+    assert await to_curl_async(request) == "curl -b 'a=1; b=2' -H 'host: h' -H 'x-a: 1, 2' http://h/"
 
 
 def _multipart_request(

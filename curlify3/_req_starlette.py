@@ -25,6 +25,25 @@ from curlify3._types import Body
 class StarletteRequest(AsyncBaseRequestData[Request]):
     _instance_of = Request
 
+    @property
+    def url(
+        self,
+    ) -> str:
+        # request.url is built from the percent-decoded path, which curl either rejects (a
+        # space) or sends to another route (%2F, %3F and %23 come back as /, ? and #, and
+        # the url is parsed again with them in it). The server keeps the path as it arrived
+        # in raw_path, so the url is put together from the scope instead
+        scope = self._request.scope
+        raw_path = scope.get("raw_path")
+        if not raw_path:
+            return str(self._request.url)
+        target = raw_path.decode("latin-1").partition("?")[0]
+        if query := scope.get("query_string"):
+            target = f"{target}?{query.decode('latin-1')}"
+        # scheme and host are unaffected by the path, which follows the authority
+        url = self._request.url
+        return f"{url.scheme}://{url.netloc}{target}" if url.netloc else target
+
     async def body(
         self,
     ) -> Body:

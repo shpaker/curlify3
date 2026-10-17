@@ -29,6 +29,17 @@ PART_FILENAME: Final = re.compile(rb';\s*filename="([^"]*)"', re.IGNORECASE)
 # is the caller's to choose, so the file is the caller's to name
 DATA_FILE_REF: Final = "@"
 FORM_FILE_REF: Final = (b"@", b"<")
+# the rest of what -F parses in a plain value: a ; starts an attribute (type=, filename=,
+# headers=@file, which reads a local file into the part headers) and a leading " opens a
+# quoted string whose tail is dropped. Such a value goes through --form-string as well
+FORM_QUOTED: Final = b'"'
+FORM_ATTRIBUTE: Final = b";"
+# a filename holding one of these is cut short by -F, at a ; or at a , (a list of files),
+# unless it is written as a quoted string, in which " and \ are escaped with a backslash
+FORM_FILENAME_UNSAFE: Final = re.compile(rb'[;,"\\]')
+FORM_FILENAME_ESCAPE: Final = re.compile(rb'(["\\])')
+# without an = in it, the value of -b is the name of a cookie file to read
+COOKIE_PAIR: Final = "="
 
 PS_QUOTE: Final = re.compile(r'(\\*)"')
 PS_TRAILING_BACKSLASHES: Final = re.compile(r"\\+$")
@@ -52,6 +63,7 @@ SHORT_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "-F",
     "form_string": "--form-string",
+    "globoff": "-g",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -61,7 +73,12 @@ LONG_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "--form",
     "form_string": "--form-string",
+    "globoff": "--globoff",
 }
+
+# curl expands [1-3] and {a,b} in a url into several requests, and drops the braces of a
+# lone {x}; a url holding any of these goes out with globbing off
+URL_GLOB: Final = re.compile(r"[\[\]{}]")
 
 
 def quote_sh(
@@ -107,7 +124,15 @@ def quote_powershell(
 ) -> str:
     # the command is emitted behind the --% stop-parsing token, so the only parser left is the
     # C runtime of curl.exe: wrap in "...", escape " as \" doubling any run of backslashes
-    # directly before it, and double a trailing run so it cannot swallow the closing quote
+    # directly before it, and double a trailing run so it cannot swallow the closing quote.
+    # A line break has no spelling there: --% is effective only until the end of the line,
+    # so whatever follows a newline would run as a powershell command of its own
+    if "\n" in value or "\r" in value:
+        raise ValueError(
+            "a value containing a line break cannot be rendered for shell 'powershell': the "
+            "--% stop-parsing token ends at the line break and the rest would run as powershell, "
+            "use shell='sh' instead"
+        )
     quoted = PS_QUOTE.sub(lambda matched: matched.group(1) * 2 + '\\"', value)
     quoted = PS_TRAILING_BACKSLASHES.sub(lambda matched: matched.group() * 2, quoted)
     return f'"{quoted}"'
@@ -200,16 +225,30 @@ def make_curl_headers(
     keep: Callable[[str], bool],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items() if keep(header)]
+    return [f"{option} {quote(make_header_arg(header, value))}" for header, value in headers.items() if keep(header)]
+
+
+def make_header_arg(
+    header: str,
+    value: str,
+) -> str:
+    # curl drops a header passed with nothing after the colon; the ; spelling is the one
+    # that sends it with an empty value
+    return f"{header}: {value}" if value else f"{header};"
 
 
 def make_curl_cookies(
     cookies: str | None,
+    quote: Quote,
     quote_word: Quote,
     options: Options,
 ) -> list[str]:
     if not cookies:
         return []
+    # -b reads a value without an = as the name of a cookie file and sends the cookies
+    # stored in it; the header carries the value as it came instead
+    if COOKIE_PAIR not in cookies:
+        return [f"{options['header']} {quote(f'cookie: {cookies}')}"]
     return [f"{options['cookie']} {quote_word(cookies)}"]
 
 
@@ -243,6 +282,21 @@ def split_multipart_body(
             yield head, value.removesuffix(b"\r\n")
 
 
+def is_form_parsed(
+    value: bytes,
+) -> bool:
+    return value.startswith((*FORM_FILE_REF, FORM_QUOTED)) or FORM_ATTRIBUTE in value
+
+
+def quote_form_filename(
+    filename: bytes,
+) -> bytes:
+    # the common filename stays bare; the quoted form is what keeps the rest of one whole
+    if FORM_FILENAME_UNSAFE.search(filename) is None:
+        return filename
+    return b'"' + FORM_FILENAME_ESCAPE.sub(rb"\\\1", filename) + b'"'
+
+
 def make_multipart_curl_args(
     body: str | bytes,
     content_type: str,
@@ -270,13 +324,13 @@ def make_multipart_curl_args(
         elif filename is not None:
             # here the leading @ is the point: -F is what makes curl send the file the
             # request sent, so a file part is spelled name=@filename
-            part, option = name.group(1) + b"=@" + filename.group(1), options["form"]
+            part, option = name.group(1) + b"=@" + quote_form_filename(filename.group(1)), options["form"]
         else:
-            # the value of a plain field is a literal, so --form-string as soon as it begins
-            # with a character -F would read as a file reference. -F stays the common case: it
-            # is the terser option and the value rarely begins with either character
+            # the value of a plain field is a literal, so --form-string as soon as it holds
+            # anything -F would parse: a file reference, a quoted string or an attribute. -F
+            # stays the common case: it is the terser option and such values are rare
             part = name.group(1) + b"=" + value
-            option = options["form_string"] if value.startswith(FORM_FILE_REF) else options["form"]
+            option = options["form_string"] if is_form_parsed(value) else options["form"]
         body_parts.append(f"{option} {quote_multipart_part(part, quote, quote_bytes)}")
     return body_parts
 
@@ -355,8 +409,9 @@ def make_curl_string(
         headers["content-type"] = MULTIPART_BOUNDARY_PARAM.sub("", headers["content-type"])
     args = [
         "--http2" if http2 else None,
+        options["globoff"] if URL_GLOB.search(url) else None,
         f"{options['request']} {method}" if method != "GET" else None,
-        *make_curl_cookies(cookies, shell_conf.quote_word, options),
+        *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep),
         *body_args,
     ]
@@ -396,8 +451,9 @@ def to_curl(
 
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
-    field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
+    field value — is not valid UTF-8 and shell="powershell", if any value contains a
+    line break and shell="powershell", or if the body or a field value contains a
+    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
     rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj(request)
@@ -443,8 +499,9 @@ async def to_curl_async(
 
     Raises ValueError if the request type or the shell value is not recognized, if
     pretty=True is combined with shell="powershell", if the body — or a multipart
-    field value — is not valid UTF-8 and shell="powershell", or if either contains
-    a NUL byte. Raises TypeError if include_headers or exclude_headers is a str
+    field value — is not valid UTF-8 and shell="powershell", if any value contains a
+    line break and shell="powershell", or if the body or a field value contains a
+    NUL byte. Raises TypeError if include_headers or exclude_headers is a str
     rather than an iterable of names, or holds a name that is not a str.
     """
     data = make_request_obj_async(request)
