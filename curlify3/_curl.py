@@ -186,7 +186,7 @@ SHELLS: Final[Mapping[str, ShellConfig]] = {
     # C runtime as the single parser — 5.1's own argument binder re-quotes by counting every
     # double quote, escaped or not, and corrupts JSON payloads no matter how they are written;
     # pwsh 7.2+ binds even these arguments the new way and needs
-    # $PSNativeCommandArgumentPassing = 'Legacy' in the session first (documented in README);
+    # $PSNativeCommandArgumentPassing = 'Legacy' in the session first (see the docs);
     # the url and cookies are always quoted to keep whitespace safe for the C runtime parser
     # pretty is impossible here: --% is effective only until the next newline and the line
     # continuation character (`) cannot extend it (about_Parsing), so a multi-line command

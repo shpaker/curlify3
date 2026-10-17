@@ -12,8 +12,8 @@ Async, the body is read from the stream:
         return {"curl": await to_curl_async(request)}
 
 Safe in a middleware as well: starlette caches the body the render consumed and
-replays it to the route handler (starlette >= 0.28) — see the logging-middleware
-example in the README.
+replays it to the route handler (starlette >= 0.28) — see the logging recipes in
+the documentation.
 """
 
 from starlette.requests import Request
