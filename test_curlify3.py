@@ -1306,6 +1306,8 @@ def test_to_curl_mask_headers(
         pytest.param({"Authorization": "Basic dXNlcjpwYXNz"}, "authorization: Basic ***", id="BASIC"),
         pytest.param({"Proxy-Authorization": "Bearer t0ken"}, "proxy-authorization: Bearer ***", id="PROXY"),
         pytest.param({"X-Auth-Token": "Bearer t0ken"}, "x-auth-token: ***", id="SCHEME ONLY FOR AUTH HEADERS"),
+        # nothing to hide, and the ; spelling is what sends an empty header at all
+        pytest.param({"X-Api-Key": ""}, "x-api-key;", id="EMPTY VALUE"),
     ],
 )
 def test_to_curl_mask_header_value(
