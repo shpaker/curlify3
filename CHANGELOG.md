@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.15 (2026-10-17)
+
+One behavior change can break existing callers: with `shell="powershell"`, a value holding a line break — a pretty-printed JSON body, a multi-line field — now raises `ValueError` instead of returning a command that would run the next line as PowerShell. Render such requests with `shell="sh"`. The rest of this release adds options and fixes commands that sent something other than the request; existing calls keep working.
 
 ### Added
 - `mask_headers` on `to_curl()` and `to_curl_async()` keeps the named headers in the command but prints `***` in place of their values, so a rendered command can go to a log without the credentials it carried ([#35](https://github.com/shpaker/curlify3/issues/35)). `authorization` and `proxy-authorization` keep the auth scheme (`Bearer ***`), and a masked `cookie` keeps the name of each cookie in `-b` (`-b 'sid=***; theme=***'`). Names match case-insensitively; the include/exclude filters decide what is printed and masking applies to what is left. The new `SENSITIVE_HEADERS` constant holds the usual credential-carrying names and is what the FastAPI middleware example in the README now passes, together with an `exclude_headers` list that drops the headers every client sends. Opt-in: the default masks nothing, so existing output does not change. Query-string and body secrets are not covered.
