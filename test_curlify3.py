@@ -1657,6 +1657,14 @@ def test_to_curl_body_file_reference_powershell() -> None:
         # < is the other spelling of the same thing, and it is a --form value only
         pytest.param(b"</etc/passwd", "--form-string 'field=</etc/passwd'", id="LEADING LT"),
         pytest.param(b"user@example.com", "-F 'field=user@example.com'", id="AT INSIDE"),
+        # -F reads ;headers=@file as a local file to load the part headers from
+        pytest.param(b"x;headers=@/etc/passwd", "--form-string 'field=x;headers=@/etc/passwd'", id="HEADERS ATTR"),
+        # and ;type= / ;filename= as attributes of the part, sending a shorter value
+        pytest.param(b"x;type=text/html", "--form-string 'field=x;type=text/html'", id="TYPE ATTR"),
+        pytest.param(b"x;filename=a.txt", "--form-string 'field=x;filename=a.txt'", id="FILENAME ATTR"),
+        # a leading " opens a quoted string, whose tail -F drops
+        pytest.param(b'"lead" more', "--form-string 'field=\"lead\" more'", id="LEADING QUOTE"),
+        pytest.param(b'say "hi"', "-F 'field=say \"hi\"'", id="QUOTE INSIDE"),
     ],
 )
 def test_to_curl_multipart_field_file_reference(
@@ -1665,6 +1673,65 @@ def test_to_curl_multipart_field_file_reference(
 ) -> None:
     req = httpx.Request(method="POST", url="https://httpbin.org/post", files={"field": (None, value)})
     assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "filename, expected",
+    [
+        pytest.param(b"a.txt", "-F 'f=@a.txt'", id="PLAIN"),
+        # -F cuts a bare filename at a ; (an attribute) or at a , (a list of files)
+        pytest.param(b"a;b.txt", "-F 'f=@\"a;b.txt\"'", id="SEMICOLON"),
+        pytest.param(b"a,b.txt", "-F 'f=@\"a,b.txt\"'", id="COMMA"),
+        # inside the quoted form a \ is escaped with a backslash, as a " would be
+        pytest.param(b"a;b\\.txt", "-F 'f=@\"a;b\\\\.txt\"'", id="BACKSLASH"),
+    ],
+)
+def test_to_curl_multipart_filename_quoting(
+    filename: bytes,
+    expected: str,
+) -> None:
+    # written as it arrives on the wire: httpx and requests would percent-encode a " themselves
+    req = requests.Request(
+        method="POST",
+        url="https://httpbin.org/post",
+        headers={"content-type": "multipart/form-data; boundary=b"},
+        data=b'--b\r\nContent-Disposition: form-data; name="f"; filename="' + filename + b'"\r\n\r\nx\r\n--b--\r\n',
+    ).prepare()
+    assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "cookie, expected",
+    [
+        pytest.param("a=1; b=2", "-b 'a=1; b=2'", id="PAIRS"),
+        # -b reads a value without an = as the name of a cookie file to send the cookies of
+        pytest.param("/etc/cookies.txt", "-H 'cookie: /etc/cookies.txt'", id="NO EQUALS"),
+    ],
+)
+def test_to_curl_cookie_without_pair(
+    cookie: str,
+    expected: str,
+) -> None:
+    req = httpx.Request(method="GET", url="https://httpbin.org/get", headers={"cookie": cookie})
+    assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        # --% ends at the line break, so the line after it would run as powershell
+        pytest.param(dict(content='a"\nGet-Date; # '), id="BODY LF"),
+        pytest.param(dict(content="a\r\nb"), id="BODY CRLF"),
+        pytest.param(dict(json={"a": 1}, headers={"x-note": "a\rb"}), id="HEADER CR"),
+        pytest.param(dict(files={"note": (None, "a\nb")}), id="MULTIPART FIELD LF"),
+    ],
+)
+def test_to_curl_line_break_powershell(
+    request_kwargs: dict[str, Any],
+) -> None:
+    req = httpx.Request(method="POST", url="https://httpbin.org/post", **request_kwargs)
+    with pytest.raises(ValueError, match="line break"):
+        to_curl(req, shell=POWERSHELL)
 
 
 def test_to_curl_multipart_field_bytes_value() -> None:
