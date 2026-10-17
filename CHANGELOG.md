@@ -9,6 +9,7 @@
 
 ### Changed
 - An unsupported request object is reported by type, with the fix when there is one ([#33](https://github.com/shpaker/curlify3/issues/33)). The bare `unknown request object` now carries the `module.qualname` of what was passed, and when the other entrypoint accepts the object — a starlette, FastAPI or aiohttp request handed to the sync `to_curl()`, or a `requests.PreparedRequest` to `to_curl_async()` — the message says to use that one instead. The exception is the new `curlify3.UnsupportedRequestError`, a subclass of both `TypeError` and `ValueError`: an unsupported type is a type error, and `except ValueError` written against earlier releases keeps catching it. The message still starts with `unknown request object`.
+- The PyPI summary is the README's first sentence now instead of "yet another library to convert request object to curl command", and the package declares keywords and links to its documentation, changelog and issue tracker ([#34](https://github.com/shpaker/curlify3/issues/34)).
 
 ### Fixed
 - `shell="powershell"` no longer renders a value holding a line break ([#45](https://github.com/shpaker/curlify3/issues/45)). `--%` is effective only until the end of the line, so the rest of a multi-line body, header or field value ran as PowerShell commands of its own — reachable from the wire through the server-side adapters, where a body such as `x"` + newline + `Get-Date; #` is the caller's to choose. Such a value now raises `ValueError`, like raw bytes already did.
