@@ -5,6 +5,12 @@
 ### Added
 - A Robot Framework keyword library, imported as `Library    curlify3.robot` and installed with the `robot` extra (`pip install curlify3[robot]`). `To Curl` returns the command, `Log As Curl` writes it to the log, `Enable Curl Logging` / `Disable Curl Logging` log every request sent through a RequestsLibrary session. The keywords take the response RequestsLibrary returns as well as the request objects `to_curl()` accepts, and the `to_curl()` options as arguments; given at import, they become the library-wide defaults. The core package still has no runtime dependencies: only `curlify3.robot` imports Robot Framework.
 
+### Fixed
+- `shell="powershell"` no longer renders a value holding a line break ([#45](https://github.com/shpaker/curlify3/issues/45)). `--%` is effective only until the end of the line, so the rest of a multi-line body, header or field value ran as PowerShell commands of its own — reachable from the wire through the server-side adapters, where a body such as `x"` + newline + `Get-Date; #` is the caller's to choose. Such a value now raises `ValueError`, like raw bytes already did.
+- A multipart field value that `-F` would parse is rendered with `--form-string` ([#45](https://github.com/shpaker/curlify3/issues/45)). A `;` started an attribute — `;headers=@file` loaded the part headers from a **local file**, `;type=` and `;filename=` changed the part and cut the value short — and a leading `"` opened a quoted string whose tail was dropped. Only a leading `@` or `<` was handled before.
+- A multipart filename holding `;`, `,`, `"` or `\` is written as a quoted string, `-F 'f=@"a;b.txt"'` ([#45](https://github.com/shpaker/curlify3/issues/45)). `-F` cut a bare one at the `;` or read the `,` as a list of files, so the command sent another file or failed.
+- A `Cookie` header without an `=` is rendered as `-H 'cookie: …'` ([#45](https://github.com/shpaker/curlify3/issues/45)). `-b` reads such a value as the name of a cookie file and sent the cookies stored in it.
+
 ## 0.14 (2026-10-16)
 
 ### Added
