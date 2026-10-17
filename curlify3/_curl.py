@@ -46,6 +46,7 @@ SHORT_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "-F",
     "form_string": "--form-string",
+    "head": "-I",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -55,6 +56,7 @@ LONG_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "--form",
     "form_string": "--form-string",
+    "head": "--head",
 }
 
 
@@ -298,6 +300,21 @@ def make_curl_body(
     return [f"{option} {quote(body)}"]
 
 
+def make_curl_method(
+    method: str,
+    has_body: bool,
+    options: Options,
+) -> str | None:
+    # a body makes curl send POST, so a GET that carries one names its method
+    if method == "GET" and not has_body:
+        return None
+    # -X HEAD keeps curl waiting for a response body that never comes; -I asks for HEAD
+    # and reads none
+    if method == "HEAD" and not has_body:
+        return options["head"]
+    return f"{options['request']} {method}"
+
+
 def make_curl_string(
     method: str,
     url: str,
@@ -331,12 +348,13 @@ def make_curl_string(
         del headers["content-length"]
     if body and isinstance(body, (str, bytes)) and not headers.get("content-type"):
         headers["content-type"] = "text/plain"
+    body_args = make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options)
     args = [
         "--http2" if http2 else None,
-        f"{options['request']} {method}" if method != "GET" else None,
+        make_curl_method(method, bool(body_args), options),
         *make_curl_cookies(cookies, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep),
-        *make_curl_body(body, headers, shell_conf.quote, shell_conf.quote_bytes, options),
+        *body_args,
     ]
     parts = [str(entity) for entity in args if entity]
     command = " ".join([part for part in (shell_conf.binary, shell_conf.args_prefix) if part])

@@ -102,6 +102,11 @@ _E2E_REQUESTS = [
         # bare ? as an unmatched glob
         id="URL SINGLE PARAM",
     ),
+    pytest.param(
+        # a body makes curl send POST unless the GET is named
+        dict(method="GET", url="/get", content=b"abc"),
+        id="GET WITH BODY",
+    ),
 ]
 
 # $'...' is ANSI-C quoting, which bash, zsh and ksh expand and powershell has no answer for,

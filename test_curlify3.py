@@ -1,4 +1,5 @@
 import asyncio
+import io
 import pathlib
 import sys
 import urllib.request
@@ -1350,7 +1351,8 @@ _TORNADO_PARAMS = [
             method="POST",
             body="foo",
         ),
-        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        # tornado sends a POST without a content-type as form-encoded, and so does the command
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'foo' https://httpbin.org/post",
         id="TEXT",
     ),
     pytest.param(
@@ -1359,7 +1361,7 @@ _TORNADO_PARAMS = [
             method="POST",
             body=b"\xff\xfe\x81binary",
         ),
-        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        r"curl -X POST -H 'content-type: application/x-www-form-urlencoded' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
         id="BINARY",
     ),
 ]
@@ -1463,7 +1465,8 @@ _URLLIB_PARAMS = [
             "https://httpbin.org/post",
             data=b"foo",
         ),
-        "curl -X POST -H 'content-type: text/plain' -d 'foo' https://httpbin.org/post",
+        # urllib adds a form-encoded content-type to data sent without one
+        "curl -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'foo' https://httpbin.org/post",
         id="TEXT",
     ),
     pytest.param(
@@ -1471,7 +1474,7 @@ _URLLIB_PARAMS = [
             "https://httpbin.org/post",
             data=b"\xff\xfe\x81binary",
         ),
-        r"curl -X POST -H 'content-type: text/plain' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
+        r"curl -X POST -H 'content-type: application/x-www-form-urlencoded' --data-raw $'\xff\xfe\x81binary' https://httpbin.org/post",
         id="BINARY",
     ),
     pytest.param(
@@ -1501,7 +1504,7 @@ def test_urllib_streaming_body_is_dropped() -> None:
     # urllib accepts an iterable body too; it has no textual form a shell could
     # run, so the command carries no -d while the method is still inferred POST
     req = urllib.request.Request("https://httpbin.org/post", data=iter([b"chunk"]))
-    assert to_curl(req) == "curl -X POST https://httpbin.org/post"
+    assert to_curl(req) == "curl -X POST -H 'content-type: application/x-www-form-urlencoded' https://httpbin.org/post"
 
 
 def test_urllib_unredirected_headers_are_rendered() -> None:
@@ -1726,3 +1729,86 @@ def test_to_curl_multipart_part_not_utf8(
         data=b"--b\r\nContent-Disposition: form-data; " + part + b"\r\n--b--\r\n",
     ).prepare()
     assert f" {expected} " in to_curl(req)
+
+
+@pytest.mark.parametrize(
+    "req",
+    [
+        pytest.param(httpx.Request("GET", "https://httpbin.org/get", content=b"abc"), id="HTTPX"),
+        pytest.param(requests.Request("GET", "https://httpbin.org/get", data="abc").prepare(), id="REQUESTS"),
+        pytest.param(urllib.request.Request("https://httpbin.org/get", data=b"abc", method="GET"), id="URLLIB"),
+    ],
+)
+def test_to_curl_get_with_body(
+    req: object,
+) -> None:
+    # a body makes curl send POST, so the GET has to be named
+    assert to_curl(req).startswith("curl -X GET ")
+
+
+@pytest.mark.parametrize(
+    "long_options, expected",
+    [
+        pytest.param(False, "curl -I https://httpbin.org/get", id="SHORT"),
+        pytest.param(True, "curl --head https://httpbin.org/get", id="LONG"),
+    ],
+)
+def test_to_curl_head(
+    long_options: bool,
+    expected: str,
+) -> None:
+    # -X HEAD keeps curl waiting for the response body a HEAD response does not have
+    req = requests.Request("HEAD", "https://httpbin.org/get").prepare()
+    assert to_curl(req, long_options=long_options) == expected
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        pytest.param(
+            dict(auth_username="u", auth_password="p"),
+            "curl -H 'authorization: Basic dTpw' https://h/x",
+            id="BASIC AUTH",
+        ),
+        pytest.param(
+            dict(auth_username="u", auth_password="p", auth_mode="basic", headers={"Authorization": "old"}),
+            "curl -H 'authorization: Basic dTpw' https://h/x",
+            id="AUTH OVER HEADER",
+        ),
+        pytest.param(dict(user_agent="UA/1"), "curl -H 'user-agent: UA/1' https://h/x", id="USER AGENT"),
+        pytest.param(dict(decompress_response=True), "curl -H 'accept-encoding: gzip' https://h/x", id="DECOMPRESS"),
+        # a None attribute takes the client's default, which the request cannot know
+        pytest.param(dict(), "curl https://h/x", id="DEFAULTS"),
+    ],
+)
+def test_tornado_send_time_headers(
+    kwargs: dict[str, Any],
+    expected: str,
+) -> None:
+    # simple_httpclient sets these headers from the request's attributes when it sends it
+    assert to_curl(tornado.httpclient.HTTPRequest("https://h/x", **kwargs)) == expected
+
+
+def test_django_disallowed_host() -> None:
+    # build_absolute_uri() raises DisallowedHost for a host outside ALLOWED_HOSTS, which made
+    # a logger that renders the request before django answers 400 fail on its own
+    request = RequestFactory().get("/a?x=1", HTTP_HOST="evil.example")
+    assert to_curl(request) == "curl -H 'host: evil.example' 'http://evil.example/a?x=1'"
+
+
+def test_werkzeug_form_parsed_first() -> None:
+    # parsing the form reads the stream to the end, and the body used to vanish from the command
+    request = _werkzeug_request(path="/post", method="POST", data={"a": "1 2", "b": "é"})
+    _ = request.form
+    assert to_curl(request) == (
+        "curl -X POST -H 'host: httpbin.org' -H 'content-type: application/x-www-form-urlencoded' "
+        "-d 'a=1+2&b=%C3%A9' https://httpbin.org/post"
+    )
+
+
+def test_werkzeug_multipart_parsed_first() -> None:
+    # the files went with the stream: nothing recoverable, so no -d, as with django
+    request = _werkzeug_request(path="/post", method="POST", data={"a": "1", "f": (io.BytesIO(b"x"), "f.txt")})
+    _ = request.form
+    assert " -d " not in to_curl(request)
+    assert " -F " not in to_curl(request)

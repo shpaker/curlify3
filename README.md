@@ -190,13 +190,13 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | `niquests` | `PreparedRequest` | ✅ | — | Pass `Request(...).prepare()`; HTTP/2 and HTTP/3 live on the transport, so no `--http2` |
 | `httpx` | `httpx.Request` | ✅ | ✅ | |
 | `httpx2` | `httpx2.Request` | ✅ | ✅ | Adds `--http2` |
-| `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method is inferred the way urllib sends it |
+| `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method and content-type are inferred the way urllib sends them |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
 | `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
 | `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it |
-| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d` |
-| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base |
-| `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side |
+| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d`; a host outside `ALLOWED_HOSTS` is rendered rather than raised |
+| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base; a form parsed before rendering is encoded again, a parsed multipart one renders without `-d` |
+| `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side; renders the headers the client derives from `auth_username`, `user_agent` and `decompress_response` |
 | `tornado` | `tornado.httputil.HTTPServerRequest` | ✅ | — | Server-side, body already read |
 
 ## Payload handling
@@ -212,7 +212,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it) |
 | Headers | `-H 'name: value'` (lowercased) |
 
-`Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess.
+`Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess — except where the client itself sends `application/x-www-form-urlencoded` (`urllib.request`, and `tornado` for a POST), which is what the command carries then.
+
+The method follows what `curl` would send otherwise: a GET that carries a body is spelled `-X GET`, since a body alone makes `curl` send POST, and a HEAD is spelled `-I`, since `-X HEAD` leaves `curl` waiting for a response body that never comes.
 
 A body that does not decode as UTF-8 is rendered as an ANSI-C quoted literal, with only the bytes that have to be escaped escaped — so a mis-encoded text body stays readable as `--data-raw $'caf\xe9'`. Two things follow from that:
 

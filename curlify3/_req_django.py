@@ -13,6 +13,7 @@ including inside async views. If the stream was consumed without buffering
 
 from typing import Any
 
+from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest
 from django.http.request import RawPostDataException
 
@@ -30,7 +31,13 @@ class DjangoRequest(BaseRequestData[Any]):
     def url(
         self,
     ) -> str:
-        return self._request.build_absolute_uri()
+        try:
+            return self._request.build_absolute_uri()
+        except DisallowedHost:
+            # build_absolute_uri() validates the host against ALLOWED_HOSTS. A logger that
+            # renders the request before django turns it into a 400 should still get the
+            # command the client sent, rather than an exception of its own
+            return f"{self._request.scheme}://{self._request._get_raw_host()}{self._request.get_full_path()}"
 
     def body(
         self,

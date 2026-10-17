@@ -51,6 +51,10 @@ class UrllibRequest(BaseRequestData[Any]):
         # with the unredirected ones kept apart; header_items() merges both
         headers = {name.lower(): _header_value(value) for name, value in self._request.header_items()}
         headers.pop("cookie", None)
+        # urllib adds this one when the request is sent, if it carries data and no
+        # content-type of its own; without it the command would claim text/plain
+        if self._request.data is not None:
+            headers.setdefault("content-type", "application/x-www-form-urlencoded")
         return headers
 
     @property
