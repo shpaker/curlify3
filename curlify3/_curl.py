@@ -57,6 +57,7 @@ SHORT_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "-F",
     "form_string": "--form-string",
+    "globoff": "-g",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -66,7 +67,12 @@ LONG_OPTIONS: Final[Options] = {
     "data_raw": "--data-raw",
     "form": "--form",
     "form_string": "--form-string",
+    "globoff": "--globoff",
 }
+
+# curl expands [1-3] and {a,b} in a url into several requests, and drops the braces of a
+# lone {x}; a url holding any of these goes out with globbing off
+URL_GLOB: Final = re.compile(r"[\[\]{}]")
 
 
 def quote_sh(
@@ -213,7 +219,16 @@ def make_curl_headers(
     keep: Callable[[str], bool],
 ) -> list[str]:
     option = options["header"]
-    return [f"{option} {quote(f'{header}: {value}')}" for header, value in headers.items() if keep(header)]
+    return [f"{option} {quote(make_header_arg(header, value))}" for header, value in headers.items() if keep(header)]
+
+
+def make_header_arg(
+    header: str,
+    value: str,
+) -> str:
+    # curl drops a header passed with nothing after the colon; the ; spelling is the one
+    # that sends it with an empty value
+    return f"{header}: {value}" if value else f"{header};"
 
 
 def make_curl_cookies(
@@ -372,6 +387,7 @@ def make_curl_string(
         headers["content-type"] = "text/plain"
     args = [
         "--http2" if http2 else None,
+        options["globoff"] if URL_GLOB.search(url) else None,
         f"{options['request']} {method}" if method != "GET" else None,
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep),
