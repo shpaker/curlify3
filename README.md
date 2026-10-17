@@ -18,6 +18,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Header filtering per call: `exclude_headers` drops the noise, `include_headers` keeps only what matters
+- A Robot Framework keyword library, `curlify3.robot.CurlifyLibrary`, with RequestsLibrary integration
 - Zero runtime dependencies
 - Fully annotated and `py.typed`, so the types reach your own type checker
 
@@ -155,6 +156,42 @@ print(to_curl(req, shell="powershell"))
 - The command is for PowerShell only — in `cmd`, git-bash, or WSL, `curl.exe` chokes on `--%`; use the default `shell="sh"` output there. On `pwsh` 7.2+, run `$PSNativeCommandArgumentPassing = 'Legacy'` in the session first.
 
 The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use instead of the raw strings.
+
+### Robot Framework
+
+`curlify3.robot.CurlifyLibrary` brings the same rendering to Robot Framework. It needs the `robot` extra:
+
+```sh
+pip install curlify3[robot]
+```
+
+```robotframework
+*** Settings ***
+Library    RequestsLibrary
+Library    curlify3.robot.CurlifyLibrary    exclude_headers=${{["user-agent", "accept-encoding"]}}
+
+*** Test Cases ***
+Render One Request
+    ${resp}=    GET    https://httpbin.org/get
+    ${cmd}=    To Curl    ${resp}    pretty=True
+    Log As Curl    ${resp}    level=DEBUG
+
+Log Every Request Of A Session
+    Create Session    httpbin    https://httpbin.org
+    Enable Curl Logging    httpbin
+    GET On Session    httpbin    /get
+    POST On Session    httpbin    /post    json=${{ {"date": "2026-08-10"} }}
+    Disable Curl Logging    httpbin
+```
+
+| Keyword | Does |
+|---|---|
+| `To Curl    request` | returns the command |
+| `Log As Curl    request    level=INFO` | writes the command to the log and returns it |
+| `Enable Curl Logging    alias    level=INFO` | logs every request sent through a RequestsLibrary session |
+| `Disable Curl Logging    alias` | stops that |
+
+`request` is any request object `to_curl()` accepts, or a response carrying one — so the `${resp}` RequestsLibrary keywords return goes in as is. Every keyword takes `shell`, `pretty`, `long_options`, `include_headers` and `exclude_headers`, with the meaning they have for `to_curl()`; given as library import arguments (plus `level`), they become the defaults the keywords fall back to. `Enable Curl Logging` covers the `* On Session` keywords; a request sent with a session-less one (`GET`, `POST` ...) goes through `Log As Curl    ${resp}` instead.
 
 ### Quoting and untrusted values
 
