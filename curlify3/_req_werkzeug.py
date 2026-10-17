@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 from werkzeug.wrappers import Request
 
-from curlify3._base import BaseRequestData
+from curlify3._base import BaseRequestData, raw_request_uri
 from curlify3._types import Body
 
 FORM_URLENCODED = "application/x-www-form-urlencoded"
@@ -23,6 +23,18 @@ FORM_URLENCODED = "application/x-www-form-urlencoded"
 
 class WerkzeugRequest(BaseRequestData[Request]):
     _instance_of = Request
+
+    @property
+    def url(
+        self,
+    ) -> str:
+        # request.url is rebuilt from PATH_INFO, which WSGI hands over percent-decoded, so an
+        # encoded / comes back as a path separator. The server that sets RAW_URI or
+        # REQUEST_URI (gunicorn, uwsgi, werkzeug's own) keeps the target as it arrived
+        raw_uri = raw_request_uri(self._request.environ)
+        if raw_uri is None:
+            return self._request.url
+        return f"{self._request.scheme}://{self._request.host}{raw_uri}"
 
     def body(
         self,

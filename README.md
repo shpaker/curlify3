@@ -194,9 +194,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | `urllib.request` | `urllib.request.Request` | ✅ | — | stdlib; an absent method and content-type are inferred the way urllib sends them |
 | `aiohttp` | `aiohttp.web.Request` | — | ✅ | Server-side, body is read from the stream |
 | `aiohttp` | `aiohttp.ClientRequest` | — | ✅ | Client-side, reachable in client middlewares (aiohttp 3.12+, non-consuming body read 3.12.1+) |
-| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it |
-| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d`; a host outside `ALLOWED_HOSTS` is rendered rather than raised |
-| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base; a form parsed before rendering is encoded again, a parsed multipart one renders without `-d` |
+| `starlette` / `fastapi` | `starlette.requests.Request` | — | ✅ | Server-side, body is read from the stream; safe in middlewares, starlette replays it; the path comes from `raw_path`, still encoded |
+| `django` | `django.http.HttpRequest` | ✅ | — | Server-side, body already buffered; a consumed stream renders without `-d`; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them; a host outside `ALLOWED_HOSTS` is rendered rather than raised |
+| `flask` / `werkzeug` | `werkzeug.wrappers.Request` | ✅ | — | Server-side; covers Flask through its Werkzeug base; the path comes from `RAW_URI` / `REQUEST_URI` when the server sets them; a form parsed before rendering is encoded again, a parsed multipart one renders without `-d` |
 | `tornado` | `tornado.httpclient.HTTPRequest` | ✅ | — | Client-side; renders the headers the client derives from `auth_username`, `user_agent` and `decompress_response` |
 | `tornado` | `tornado.httputil.HTTPServerRequest` | ✅ | — | Server-side, body already read |
 
@@ -207,13 +207,16 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Plain text | `-d 'text'` |
 | JSON | `-d '{"k":"v"}'` with `content-type: application/json` |
 | Form-encoded | `-d 'k=v&k2=v2'` with `content-type: application/x-www-form-urlencoded` |
-| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts |
+| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts; the `boundary` parameter is left out of `-H 'content-type: …'`, since `-F` brings its own |
+| Empty file input | `-F 'field=;filename=""'` for a part with `filename=""` |
+| Other multipart | `multipart/related`, `multipart/mixed` and the rest go out as the body they are, with their own boundary |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
 | File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
 | Field `-F` would parse | `--form-string 'field=x;type=y'` when a value holds a `;` or starts with `"` |
 | Filename `-F` would split | `-F 'f=@"a;b.txt"'` when a filename holds `;`, `,`, `"` or `\` |
-| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it); `-H 'cookie: …'` when the value has no `=` |
-| Headers | `-H 'name: value'` (lowercased) |
+| Cookies | `-b k=v` (lifted out of the `Cookie` header, quoted when it needs it; repeated `Cookie` headers joined with `; `); `-H 'cookie: …'` when the value has no `=` |
+| Headers | `-H 'name: value'` (lowercased; a repeated header joined with `, `, an empty one as `-H 'name;'`) |
+| Url with `[]` or `{}` | `-g`, so `curl` does not expand them as a glob |
 
 `Content-Length` is dropped. If a body is present without `Content-Type`, `content-type: text/plain` is added so `curl` does not guess — except where the client itself sends `application/x-www-form-urlencoded` (`urllib.request`, and `tornado` for a POST), which is what the command carries then.
 
