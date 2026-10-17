@@ -269,6 +269,24 @@ One convention the tooling cannot enforce on its own: every parameter of a funct
 
 CI runs the linter and the type checker on every pull request, and the test suite on Python 3.10–3.15. A separate `windows-latest` job runs the end-to-end tests against the real `powershell.exe` 5.1 and `pwsh`, so the PowerShell dialect is verified by the shell it targets rather than by string comparison alone. The POSIX end-to-end tests do the same through `bash`: the generated command is executed and a local server checks the request arrived byte-for-byte.
 
+## Versioning
+
+From 1.0.0 on, `curlify3` follows [Semantic Versioning](https://semver.org/), with three-part versions (`MAJOR.MINOR.PATCH`); the 0.x releases were tagged with two.
+
+The public API is:
+
+- `to_curl()` and `to_curl_async()`, their parameters and their defaults
+- the `SH` and `POWERSHELL` constants
+- the `ValueError` / `TypeError` contract documented in [API](#api)
+- the request types listed in [Supported request objects](#supported-request-objects)
+- the rendered command
+
+The rendered command is promised by what it sends, not by its spelling: within a major version, a command rendered for a request keeps sending that request. Its text — option order, which values are quoted and how, header order — may change in a minor release, always with a changelog entry, and never in a patch release unless the old text sent something other than the request. Pin a minor version if your tests compare the output string verbatim.
+
+Everything under `curlify3._*`, the adapter classes included, is internal and may change in any release.
+
+A minor release may add parameters, request types and shell dialects, and may drop a Python version that has reached its end of life or a library version its own maintainers no longer support, noted in the changelog. Removing or renaming anything public, changing a default, or dropping a supported request type takes a major release.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).

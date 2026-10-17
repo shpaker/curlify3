@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0 (unreleased)
+
+The API is unchanged from 0.14; this release declares it stable.
+
+### Changed
+- Versioning follows [Semantic Versioning](https://semver.org/) from here on, with three-part versions. The README's [Versioning](README.md#versioning) section spells out what is public — `to_curl()`, `to_curl_async()`, `SH`, `POWERSHELL`, the documented exceptions, the supported request types and the rendered command — and what a minor release may change.
+- The `Development Status` classifier moves from `4 - Beta` to `5 - Production/Stable`.
+
 ## 0.14 (2026-10-16)
 
 ### Added

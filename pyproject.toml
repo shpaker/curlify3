@@ -12,7 +12,7 @@ authors = [
 # the pypi badge in the README reads the python versions off these; no License ::
 # classifier, it is superseded by the SPDX expression above (PEP 639)
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
