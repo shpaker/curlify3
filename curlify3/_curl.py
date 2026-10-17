@@ -64,6 +64,7 @@ SHORT_OPTIONS: Final[Options] = {
     "form": "-F",
     "form_string": "--form-string",
     "globoff": "-g",
+    "head": "-I",
 }
 LONG_OPTIONS: Final[Options] = {
     "request": "--request",
@@ -74,6 +75,7 @@ LONG_OPTIONS: Final[Options] = {
     "form": "--form",
     "form_string": "--form-string",
     "globoff": "--globoff",
+    "head": "--head",
 }
 
 # curl expands [1-3] and {a,b} in a url into several requests, and drops the braces of a
@@ -370,6 +372,21 @@ def make_curl_body(
     return [f"{option} {quote(body)}"]
 
 
+def make_curl_method(
+    method: str,
+    has_body: bool,
+    options: Options,
+) -> str | None:
+    # a body makes curl send POST, so a GET that carries one names its method
+    if method == "GET" and not has_body:
+        return None
+    # -X HEAD keeps curl waiting for a response body that never comes; -I asks for HEAD
+    # and reads none
+    if method == "HEAD" and not has_body:
+        return options["head"]
+    return f"{options['request']} {method}"
+
+
 def make_curl_string(
     method: str,
     url: str,
@@ -410,7 +427,7 @@ def make_curl_string(
     args = [
         "--http2" if http2 else None,
         options["globoff"] if URL_GLOB.search(url) else None,
-        f"{options['request']} {method}" if method != "GET" else None,
+        make_curl_method(method, bool(body_args), options),
         *make_curl_cookies(cookies, shell_conf.quote, shell_conf.quote_word, options),
         *make_curl_headers(headers, shell_conf.quote, options, keep),
         *body_args,

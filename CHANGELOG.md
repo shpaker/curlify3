@@ -15,6 +15,12 @@
 - A file part with an empty filename, which a browser sends for a file input left empty, is rendered as `-F 'f=;filename=""'` ([#50](https://github.com/shpaker/curlify3/issues/50)). `-F 'f=@'` names a file curl cannot open, so the command failed without sending anything.
 - A part whose `filename` comes before its `name` keeps its field name ([#50](https://github.com/shpaker/curlify3/issues/50)). `name="` was matched inside `filename="` as well, so the filename named the field.
 - Only `multipart/form-data` is taken apart into `-F` parts, matched case-insensitively ([#50](https://github.com/shpaker/curlify3/issues/50)). `multipart/related` and `multipart/mixed` carry no field names, so their parts were skipped one by one — a `multipart/related` body was left out of the command entirely. They go out as the body they are now, with the boundary they were written with.
+- A werkzeug / flask request whose form was read before the command was rendered no longer loses its body ([#52](https://github.com/shpaker/curlify3/issues/52)). Parsing reads the stream to the end, so the command carried no `-d` without a word. An urlencoded form is encoded again from the parsed fields; a multipart one also held files and renders without `-d`, the way a consumed django stream already did.
+- A GET that carries a body is rendered with `-X GET` ([#52](https://github.com/shpaker/curlify3/issues/52)). `-X` was left out for GET, and a body makes curl send POST.
+- A HEAD request is rendered with `-I` / `--head` instead of `-X HEAD` ([#52](https://github.com/shpaker/curlify3/issues/52)), which kept curl waiting for a response body a HEAD response does not have.
+- A `urllib.request.Request` with data and no content-type renders `content-type: application/x-www-form-urlencoded` ([#52](https://github.com/shpaker/curlify3/issues/52)), which urllib adds when it sends the request, rather than `text/plain`.
+- A django request whose host is outside `ALLOWED_HOSTS` is rendered instead of raising `DisallowedHost` ([#52](https://github.com/shpaker/curlify3/issues/52)), so a logger that runs before django answers 400 still gets the command.
+- A tornado client `HTTPRequest` renders the headers the client sets from its attributes when it sends it ([#52](https://github.com/shpaker/curlify3/issues/52)): `authorization` from `auth_username` / `auth_password` (basic), `user-agent` from `user_agent`, `accept-encoding: gzip` from `decompress_response`, and a form-encoded content-type for a POST without one.
 
 ## 0.14 (2026-10-16)
 

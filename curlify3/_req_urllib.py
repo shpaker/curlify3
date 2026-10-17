@@ -21,7 +21,7 @@ from typing import Any
 from urllib.request import Request
 
 from curlify3._base import BaseRequestData
-from curlify3._types import Body
+from curlify3._types import Body, Headers
 
 
 # Request falls outside the RawRequest protocol — there is no url attribute
@@ -50,6 +50,17 @@ class UrllibRequest(BaseRequestData[Any]):
         # headers live in a plain case-sensitive dict under capitalize()d keys,
         # with the unredirected ones kept apart; header_items() merges both
         return self._request.header_items()
+
+    @property
+    def headers(
+        self,
+    ) -> Headers:
+        headers = super().headers
+        # urllib adds this one when the request is sent, if it carries data and no
+        # content-type of its own; without it the command would claim text/plain
+        if self._request.data is not None:
+            headers.setdefault("content-type", "application/x-www-form-urlencoded")
+        return headers
 
     def body(
         self,

@@ -24,14 +24,16 @@ incoming request renders synchronously:
             self.write({"curl": to_curl(self.request)})
 """
 
+import base64
+
 from collections.abc import Iterable
 from typing import Any
 
 from tornado.httpclient import HTTPRequest
-from tornado.httputil import HTTPHeaders, HTTPServerRequest
+from tornado.httputil import HTTPHeaders, HTTPServerRequest, encode_username_password
 
 from curlify3._base import BaseRequestData
-from curlify3._types import Body
+from curlify3._types import Body, Headers
 
 
 def _tornado_header_items(
@@ -49,6 +51,26 @@ class TornadoRequest(BaseRequestData[HTTPRequest]):
         self,
     ) -> Iterable[tuple[Any, Any]]:
         return _tornado_header_items(self._request.headers)
+
+    @property
+    def headers(
+        self,
+    ) -> Headers:
+        # the client sets these from the request's own attributes when it sends it, over any
+        # header of the same name; the client-wide defaults (a None attribute) are not the
+        # request's to know, so only what was set on it is rendered
+        headers = super().headers
+        request = self._request
+        if request.auth_username is not None and request.auth_mode in (None, "basic"):
+            credentials = encode_username_password(request.auth_username, request.auth_password or "")
+            headers["authorization"] = "Basic " + base64.b64encode(credentials).decode()
+        if request.user_agent:
+            headers["user-agent"] = request.user_agent
+        if request.decompress_response:
+            headers["accept-encoding"] = "gzip"
+        if request.method == "POST":
+            headers.setdefault("content-type", "application/x-www-form-urlencoded")
+        return headers
 
     def body(
         self,
