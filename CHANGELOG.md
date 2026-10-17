@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A multipart command no longer sends two boundaries ([#50](https://github.com/shpaker/curlify3/issues/50)). `-F` makes curl pick a boundary of its own and append it to the `content-type` given with `-H`, which still carried the request's — `boundary=X; boundary=<curl's>`, and a server that reads the first one cannot parse the body. The `boundary` parameter is left out of the header now.
+- A file part with an empty filename, which a browser sends for a file input left empty, is rendered as `-F 'f=;filename=""'` ([#50](https://github.com/shpaker/curlify3/issues/50)). `-F 'f=@'` names a file curl cannot open, so the command failed without sending anything.
+- A part whose `filename` comes before its `name` keeps its field name ([#50](https://github.com/shpaker/curlify3/issues/50)). `name="` was matched inside `filename="` as well, so the filename named the field.
+- Only `multipart/form-data` is taken apart into `-F` parts, matched case-insensitively ([#50](https://github.com/shpaker/curlify3/issues/50)). `multipart/related` and `multipart/mixed` carry no field names, so their parts were skipped one by one — a `multipart/related` body was left out of the command entirely. They go out as the body they are now, with the boundary they were written with.
+
 ## 0.14 (2026-10-16)
 
 ### Added

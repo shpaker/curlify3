@@ -38,6 +38,7 @@ def capture_server() -> Iterator[CaptureServer]:
                 {
                     "method": self.command,
                     "path": self.path,
+                    "content_type": self.headers.get("content-type"),
                     "body": self.rfile.read(length),
                 }
             )
@@ -116,6 +117,17 @@ _SH_ONLY_REQUESTS = [
         # the leading @ that --data and --data-binary would read as a filename
         dict(method="POST", url="/post", content=b"@\xff\xfe"),
         id="RAW BYTES LEADING AT",
+    ),
+    pytest.param(
+        # not form-data, so not taken apart into -F parts: the body goes out as it is, with
+        # the boundary it was written with. Sh only, for the CRLFs the body is made of
+        dict(
+            method="POST",
+            url="/post",
+            headers={"content-type": "multipart/related; boundary=b"},
+            content=b'--b\r\nContent-Type: application/json\r\n\r\n{"a": 1}\r\n--b--\r\n',
+        ),
+        id="MULTIPART RELATED",
     ),
 ]
 
@@ -243,6 +255,61 @@ def test_sh_multipart_field_file_reference_e2e(
     # what matters is that the field carries the reference itself and not the file behind it
     assert value.encode() in body, body
     assert b"SECRET-FILE-CONTENT" not in body, body
+
+
+def run_sh_multipart(
+    req: httpx.Request,
+    tmp_path: pathlib.Path,
+    captured: list[dict[str, Any]],
+) -> dict[str, Any]:
+    script_path = tmp_path / "cmd.sh"
+    script_path.write_text(to_curl(req, shell=SH), encoding="utf-8")
+    # run from tmp_path, where a file part's relative filename resolves
+    completed = subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        timeout=SUBPROCESS_TIMEOUT,
+        cwd=tmp_path,
+    )
+    debug = (completed.returncode, completed.stdout, completed.stderr)
+    assert completed.returncode == 0, debug
+    assert len(captured) == 1, (captured, debug)
+    return captured[0]
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_multipart_single_boundary_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # -F picks a boundary of its own and curl appends it to the -H content-type, so the one
+    # the request was written with has to stay out of the header
+    base_url, captured = capture_server
+    (tmp_path / "a.txt").write_bytes(b"FILE-CONTENT")
+    req = httpx.Request(method="POST", url=base_url + "/post", files={"f": ("a.txt", b"x")}, data={"k": "v"})
+    request = run_sh_multipart(req, tmp_path, captured)
+    content_type = request["content_type"]
+    assert content_type.count("boundary=") == 1, content_type
+    boundary = content_type.split("boundary=")[1].encode()
+    assert request["body"].startswith(b"--" + boundary), request
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
+def test_sh_multipart_empty_filename_e2e(
+    capture_server: CaptureServer,
+    tmp_path: pathlib.Path,
+) -> None:
+    # a browser sends an empty file input as a file part with filename="", which -F 'f=@'
+    # could not render: curl exited before sending anything
+    base_url, captured = capture_server
+    req = httpx.Request(
+        method="POST",
+        url=base_url + "/post",
+        headers={"content-type": "multipart/form-data; boundary=b"},
+        content=b'--b\r\nContent-Disposition: form-data; name="f"; filename=""\r\n\r\n\r\n--b--\r\n',
+    )
+    request = run_sh_multipart(req, tmp_path, captured)
+    assert b'name="f"; filename=""' in request["body"], request
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="sh dialect targets POSIX shells")
