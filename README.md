@@ -18,6 +18,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Header filtering per call: `exclude_headers` drops the noise, `include_headers` keeps only what matters
+- Secret masking per call: `mask_headers` keeps a header but masks its value, so commands can go to logs
 - A Robot Framework keyword library, `curlify3.robot`, with RequestsLibrary integration
 - Zero runtime dependencies
 - Fully annotated and `py.typed`, so the types reach your own type checker
@@ -57,7 +58,7 @@ On the server side, the same call turns into a one-function logging middleware t
 import logging
 
 from fastapi import FastAPI, Request
-from curlify3 import to_curl_async
+from curlify3 import SENSITIVE_HEADERS, to_curl_async
 
 logger = logging.getLogger("app.requests")
 
@@ -68,17 +69,23 @@ async def log_request_as_curl(request: Request, call_next):
     # Reading the body in a middleware is safe here: starlette caches what
     # to_curl_async() consumed and replays it, so the route handler still
     # receives the full body (starlette >= 0.28).
-    curl = await to_curl_async(request)
+    curl = await to_curl_async(
+        request,
+        # drop the headers every client sends on its own, they only add noise
+        exclude_headers=["accept", "accept-encoding", "connection", "user-agent"],
+        # keep tokens, API keys and cookie values out of the log
+        mask_headers=SENSITIVE_HEADERS,
+    )
     # Log before handing over to the handler, so the command is captured
     # even for requests the handler then fails on — the ones worth replaying.
     logger.info("incoming request: %s", curl)
     return await call_next(request)
 ```
 
-A `POST` with a JSON body arrives in the log as:
+An authenticated `POST` with a JSON body arrives in the log as:
 
 ```
-incoming request: curl -X POST -H 'host: api.example.com' -H 'accept: */*' -H 'content-type: application/json' -d '{"item":"book","qty":2}' http://api.example.com/orders
+incoming request: curl -X POST -H 'host: api.example.com' -H 'authorization: Bearer ***' -H 'content-type: application/json' -d '{"item":"book","qty":2}' http://api.example.com/orders
 ```
 
 Every value in that command was chosen by the client; [Quoting and untrusted values](#quoting-and-untrusted-values) is what makes it safe to paste anyway.
@@ -131,6 +138,27 @@ print(to_curl(req, include_headers=["content-type"]))
 ```
 
 The two combine: `include_headers` narrows first and `exclude_headers` subtracts from what is left. `include_headers=[]` renders no headers at all, while the default `None` renders all of them. `Cookie` counts as a header, so a filter that drops it drops `-b` as well. The filter only decides what is printed: leaving out `content-type` hides its `-H` line, but a multipart body is still rendered as `-F` parts. A bare string such as `exclude_headers="accept"` raises `TypeError`, because it would otherwise be read one character at a time.
+
+### Masking secrets
+
+`mask_headers` keeps the named headers in the command but prints `***` in place of their values. The command still shows what the request carried, without the credentials — paste the real value back in to replay it. `SENSITIVE_HEADERS` holds the usual suspects: `authorization`, `proxy-authorization`, `cookie`, `x-api-key`, `x-auth-token` and `x-csrf-token`.
+
+```python
+import requests
+from curlify3 import SENSITIVE_HEADERS, to_curl
+
+req = requests.Request(
+    "GET",
+    "https://httpbin.org/get",
+    headers={"Authorization": "Bearer t0ken", "X-Api-Key": "k3y"},
+    cookies={"sid": "s3cret", "theme": "dark"},
+).prepare()
+
+print(to_curl(req, mask_headers=SENSITIVE_HEADERS))
+# curl -b 'sid=***; theme=***' -H 'authorization: Bearer ***' -H 'x-api-key: ***' https://httpbin.org/get
+```
+
+`authorization` and `proxy-authorization` keep their scheme (`Basic`, `Bearer`, …), and a masked `cookie` keeps the name of each cookie in `-b`. Names match case-insensitively, and the option combines with the filters: `include_headers` / `exclude_headers` decide which headers are printed, `mask_headers` then masks what is left. Masking is opt-in — the default masks nothing, so a command copied from a debugger still works as is. Only headers are covered: a secret in the query string or the body is printed as it is.
 
 ### Windows PowerShell
 
@@ -208,15 +236,15 @@ The url and the cookie header are left bare when every character in them is safe
 
 ## API
 
-### `to_curl(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=()) -> str`
+### `to_curl(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=(), mask_headers=()) -> str`
 
 Render a request object as a `curl` command. Use for synchronous client-side request types (`requests.PreparedRequest`, `niquests.PreparedRequest`, `httpx.Request`, `httpx2.Request`, `urllib.request.Request`, `tornado.httpclient.HTTPRequest`) and for server-side requests whose body the framework has already buffered (`django.http.HttpRequest`, `werkzeug.wrappers.Request` / `flask.Request`, `tornado.httputil.HTTPServerRequest`).
 
-### `to_curl_async(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=()) -> str`
+### `to_curl_async(request, shell="sh", pretty=False, long_options=False, include_headers=None, exclude_headers=(), mask_headers=()) -> str`
 
 Async variant. Use for request objects whose body must be `await`-ed (`aiohttp.web.Request`, `aiohttp.ClientRequest`, `starlette.requests.Request`) or when you prefer the async pathway for `httpx` / `httpx2`.
 
-`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers).
+`shell` selects the output dialect: `"sh"` (default, POSIX shells) or `"powershell"` (Windows PowerShell 5.1; for `pwsh` 7.2+ see the PowerShell section). `pretty` breaks the command across lines, `long_options` spells the options out; both default to `False`, which keeps the output on a single line with short options. `include_headers` / `exclude_headers` filter the rendered headers by name, see [Filtering headers](#filtering-headers). `mask_headers` masks the values of the named headers, see [Masking secrets](#masking-secrets).
 
 Both functions raise `curlify3.UnsupportedRequestError` if no adapter accepts the request object. It subclasses both `TypeError` and `ValueError`, so `except ValueError` written against earlier releases still catches it. The message names the type that was passed, and when the other entrypoint accepts it — a starlette request handed to `to_curl()`, say — it says to use that one instead:
 
@@ -224,7 +252,7 @@ Both functions raise `curlify3.UnsupportedRequestError` if no adapter accepts th
 unknown request object: starlette.requests.Request, it is accepted by to_curl_async(), use that instead
 ```
 
-They raise `ValueError` if the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), if any value contains a line break and `shell="powershell"`, or if the body or a multipart field value contains a NUL byte. They raise `TypeError` if `include_headers` or `exclude_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
+They raise `ValueError` if the `shell` value is not recognized, if `pretty=True` is combined with `shell="powershell"`, if the body — or a multipart field value — is not valid UTF-8 and `shell="powershell"` (raw bytes have no spelling behind the `--%` token), if any value contains a line break and `shell="powershell"`, or if the body or a multipart field value contains a NUL byte. They raise `TypeError` if `include_headers`, `exclude_headers` or `mask_headers` is a `str` rather than an iterable of names, or holds a name that is not a `str`.
 
 ## Supported request objects
 
