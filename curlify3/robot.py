@@ -2,7 +2,7 @@
 
     *** Settings ***
     Library    RequestsLibrary
-    Library    curlify3.robot.CurlifyLibrary    exclude_headers=${{["user-agent"]}}
+    Library    curlify3.robot    exclude_headers=${{["user-agent"]}}
 
     *** Test Cases ***
     Log One Request
@@ -14,7 +14,7 @@
         Enable Curl Logging    httpbin
         GET On Session         httpbin    /get
 
-Needs robotframework, installed with the robot extra: pip install curlify3[robot].
+Needs robotframework 7.2+, installed with the robot extra: pip install curlify3[robot].
 The keywords take every request object to_curl() accepts, and anything carrying
 one in its request attribute, such as the response RequestsLibrary returns.
 """
@@ -65,6 +65,8 @@ class _CurlLogHook:
         self._library.log_as_curl(response, level=self._level, **self._options)
 
 
+# `Library    curlify3.robot` resolves to the one @library class defined in this module,
+# so it has to stay the only one; `curlify3.robot.CurlifyLibrary` names it explicitly
 @library(scope="GLOBAL", auto_keywords=False)
 class CurlifyLibrary:
     """Renders HTTP requests as ready-to-run curl commands.

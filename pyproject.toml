@@ -28,8 +28,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-# the core stays dependency-free; only curlify3.robot imports robot framework
-robot = ["robotframework>=6.1"]
+# the core stays dependency-free; only curlify3.robot imports robot framework. 7.2 is the
+# first release that resolves `Library    curlify3.robot` to the @library class inside it
+robot = ["robotframework>=7.2"]
 
 [project.urls]
 Repository = "https://github.com/shpaker/curlify3"
@@ -50,7 +51,7 @@ dev = [
     "pytest>=7.4",
     "pytest-aiohttp>=1.0",
     "pytest-asyncio>=0.23",
-    "robotframework>=6.1",
+    "robotframework>=7.2",
     "robotframework-requests>=0.9",
 ]
 

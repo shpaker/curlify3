@@ -112,13 +112,14 @@ def _messages(
 def _run_suite(
     tmp_path: pathlib.Path,
     body: str,
+    library: str = "curlify3.robot",
     **variables: str,
 ) -> dict[str, list[str]]:
     suite = tmp_path / "suite.robot"
     suite.write_text(
         "*** Settings ***\n"
         "Library    RequestsLibrary\n"
-        "Library    curlify3.robot.CurlifyLibrary"
+        f"Library    {library}"
         "    exclude_headers=${{['user-agent', 'accept-encoding', 'accept', 'connection']}}\n"
         "\n"
         "*** Test Cases ***\n" + body,
@@ -179,3 +180,17 @@ def test_enable_curl_logging_unknown_alias(
         "    ...    Enable Curl Logging    missing\n",
     )
     assert "Unknown Alias" in messages
+
+
+def test_import_by_class_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    messages = _run_suite(
+        tmp_path,
+        "Class Path\n"
+        "    ${req}=    Evaluate    requests.Request('GET', 'http://x/').prepare()    modules=requests\n"
+        "    ${cmd}=    To Curl    ${req}\n"
+        "    Should Be Equal    ${cmd}    curl http://x/\n",
+        library="curlify3.robot.CurlifyLibrary",
+    )
+    assert "Class Path" in messages

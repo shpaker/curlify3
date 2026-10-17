@@ -18,7 +18,7 @@ Convert request objects from popular Python HTTP libraries into ready-to-run `cu
 - POSIX shell output by default, Windows PowerShell output with `shell="powershell"`
 - One-line output by default, multi-line with `pretty=True` and long option names with `long_options=True`
 - Header filtering per call: `exclude_headers` drops the noise, `include_headers` keeps only what matters
-- A Robot Framework keyword library, `curlify3.robot.CurlifyLibrary`, with RequestsLibrary integration
+- A Robot Framework keyword library, `curlify3.robot`, with RequestsLibrary integration
 - Zero runtime dependencies
 - Fully annotated and `py.typed`, so the types reach your own type checker
 
@@ -159,7 +159,7 @@ The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use inste
 
 ### Robot Framework
 
-`curlify3.robot.CurlifyLibrary` brings the same rendering to Robot Framework. It needs the `robot` extra:
+`curlify3.robot` brings the same rendering to Robot Framework. It needs the `robot` extra, which pulls in Robot Framework 7.2 or newer:
 
 ```sh
 pip install curlify3[robot]
@@ -168,7 +168,7 @@ pip install curlify3[robot]
 ```robotframework
 *** Settings ***
 Library    RequestsLibrary
-Library    curlify3.robot.CurlifyLibrary    exclude_headers=${{["user-agent", "accept-encoding"]}}
+Library    curlify3.robot    exclude_headers=${{["user-agent", "accept-encoding"]}}
 
 *** Test Cases ***
 Render One Request
