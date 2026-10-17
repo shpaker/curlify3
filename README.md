@@ -207,7 +207,9 @@ Both functions raise `ValueError` if the request type or the `shell` value is no
 | Plain text | `-d 'text'` |
 | JSON | `-d '{"k":"v"}'` with `content-type: application/json` |
 | Form-encoded | `-d 'k=v&k2=v2'` with `content-type: application/x-www-form-urlencoded` |
-| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts |
+| Multipart / files | `-F 'field=@file' -F 'other=value'`, in the order the body carries the parts; the `boundary` parameter is left out of `-H 'content-type: …'`, since `-F` brings its own |
+| Empty file input | `-F 'field=;filename=""'` for a part with `filename=""` |
+| Other multipart | `multipart/related`, `multipart/mixed` and the rest go out as the body they are, with their own boundary |
 | Binary | `--data-raw $'\xff\xfe'` when the body is not valid UTF-8 |
 | File reference | `--data-raw '@name'` / `--form-string 'field=@name'` when a value starts with `@` or `<` |
 | Field `-F` would parse | `--form-string 'field=x;type=y'` when a value holds a `;` or starts with `"` |
