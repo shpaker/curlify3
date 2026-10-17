@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- A Robot Framework keyword library, imported as `Library    curlify3.robot` and installed with the `robot` extra (`pip install curlify3[robot]`, Robot Framework 7.2+). `To Curl` returns the command, `Log As Curl` writes it to the log, `Enable Curl Logging` / `Disable Curl Logging` log every request sent through a RequestsLibrary session. The keywords take the response RequestsLibrary returns as well as the request objects `to_curl()` accepts, and the `to_curl()` options as arguments; given at import, they become the library-wide defaults. The core package still has no runtime dependencies: only `curlify3.robot` imports Robot Framework.
+- A Robot Framework keyword library, imported as `Library    curlify3.robot` and installed with the `robot` extra (`pip install curlify3[robot]`). `To Curl` returns the command, `Log As Curl` writes it to the log, `Enable Curl Logging` / `Disable Curl Logging` log every request sent through a RequestsLibrary session. The keywords take the response RequestsLibrary returns as well as the request objects `to_curl()` accepts, and the `to_curl()` options as arguments; given at import, they become the library-wide defaults. The core package still has no runtime dependencies: only `curlify3.robot` imports Robot Framework.
 
 ## 0.14 (2026-10-16)
 

@@ -159,7 +159,7 @@ The constants `curlify3.SH` and `curlify3.POWERSHELL` are exported for use inste
 
 ### Robot Framework
 
-`curlify3.robot` brings the same rendering to Robot Framework. It needs the `robot` extra, which pulls in Robot Framework 7.2 or newer:
+`curlify3.robot` brings the same rendering to Robot Framework. It needs the `robot` extra:
 
 ```sh
 pip install curlify3[robot]

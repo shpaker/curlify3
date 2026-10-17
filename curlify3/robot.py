@@ -14,7 +14,7 @@
         Enable Curl Logging    httpbin
         GET On Session         httpbin    /get
 
-Needs robotframework 7.2+, installed with the robot extra: pip install curlify3[robot].
+Needs robotframework, installed with the robot extra: pip install curlify3[robot].
 The keywords take every request object to_curl() accepts, and anything carrying
 one in its request attribute, such as the response RequestsLibrary returns.
 """
@@ -27,7 +27,7 @@ from robot.libraries.BuiltIn import BuiltIn
 
 from curlify3._curl import SH, to_curl
 
-__all__ = ["CurlifyLibrary"]
+__all__ = ["CurlifyLibrary", "robot"]
 
 # the levels robot's logger.write() takes, less HTML: a command written at that level
 # would be rendered as markup rather than shown as the text to copy
@@ -65,8 +65,6 @@ class _CurlLogHook:
         self._library.log_as_curl(response, level=self._level, **self._options)
 
 
-# `Library    curlify3.robot` resolves to the one @library class defined in this module,
-# so it has to stay the only one; `curlify3.robot.CurlifyLibrary` names it explicitly
 @library(scope="GLOBAL", auto_keywords=False)
 class CurlifyLibrary:
     """Renders HTTP requests as ready-to-run curl commands.
@@ -193,6 +191,11 @@ class CurlifyLibrary:
         """Stops `Enable Curl Logging` for the RequestsLibrary session ``alias``."""
         hooks = _response_hooks(alias)
         hooks[:] = [hook for hook in hooks if not isinstance(hook, _CurlLogHook)]
+
+
+# `Library    curlify3.robot` makes robot look for a class named like the module in it,
+# on every robot version; `curlify3.robot.CurlifyLibrary` names the same class explicitly
+robot = CurlifyLibrary
 
 
 def _response_hooks(

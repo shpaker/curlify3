@@ -453,7 +453,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "robotframework", marker = "extra == 'robot'", specifier = ">=7.2" }]
+requires-dist = [{ name = "robotframework", marker = "extra == 'robot'", specifier = ">=6.1" }]
 provides-extras = ["robot"]
 
 [package.metadata.requires-dev]
@@ -469,7 +469,7 @@ dev = [
     { name = "pytest-aiohttp", specifier = ">=1.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "requests", specifier = ">=2.32" },
-    { name = "robotframework", specifier = ">=7.2" },
+    { name = "robotframework", specifier = ">=6.1" },
     { name = "robotframework-requests", specifier = ">=0.9" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "tornado", specifier = ">=6.2" },
